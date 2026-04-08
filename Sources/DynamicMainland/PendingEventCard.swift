@@ -1,15 +1,17 @@
 import SwiftUI
 
-/// 待处理事件卡片 — 深色主题，带 Agent 专属色高亮
+/// 待处理事件卡片 — 设计令牌驱动，带视觉层级区分
 struct PendingEventCard: View {
     let event: PendingEvent
     let viewModel: AgentViewModel
+    /// 是否为键盘快捷键目标（第一个待处理事件）
+    var isKeyboardTarget: Bool = false
 
     @State private var answerText: String = ""
     @State private var isHovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DT.Space.md) {
             switch event {
             case .permissionRequest(let sessionId, let requestId, let agent, let toolName, let description):
                 permissionView(
@@ -27,194 +29,200 @@ struct PendingEventCard: View {
                 notificationView(agent: agent, level: level, message: message)
             }
         }
-        .padding(12)
+        .padding(DT.Space.lg)
         .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(hex: "#1A1A1A"))
+            RoundedRectangle(cornerRadius: DT.Radius.md)
+                .fill(cardBackground)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(borderColor.opacity(isHovered ? 0.5 : 0.25), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: DT.Radius.md)
+                        .stroke(borderColor.opacity(isHovered ? 0.5 : 0.3), lineWidth: 1)
                 )
-                .shadow(color: borderColor.opacity(0.1), radius: 8, y: 2)
+                .shadow(color: borderColor.opacity(0.1), radius: DT.Shadow.mdRadius, y: DT.Shadow.mdY)
         )
+        // 键盘目标指示：左侧发光边
+        .overlay(alignment: .leading) {
+            if isKeyboardTarget {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(borderColor)
+                    .frame(width: 2)
+                    .padding(.vertical, DT.Space.md)
+                    .shadow(color: borderColor.opacity(0.6), radius: 4)
+            }
+        }
         .onHover { h in
             withAnimation(.easeInOut(duration: 0.15)) { isHovered = h }
         }
     }
 
-    // MARK: - 权限请求
+    // MARK: - Permission
 
     private func permissionView(
         sessionId: String, requestId: String,
         agent: AgentKind, toolName: String, description: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // 头部
-            HStack(spacing: 6) {
-                RoundedRectangle(cornerRadius: 2)
+        VStack(alignment: .leading, spacing: DT.Space.md) {
+            // 头部（合并工具名称到标题行）
+            HStack(spacing: DT.Space.sm) {
+                RoundedRectangle(cornerRadius: DT.Space.xxs)
                     .fill(Color(hex: agent.accentColor))
                     .frame(width: 3, height: 16)
                 Image(systemName: "shield.checkered")
                     .font(.system(size: 11))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(DT.Accent.brand)
                 Text(agent.displayName)
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white)
-                Text("requests permission")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(Color(hex: "#888888"))
-                Spacer()
-            }
+                    .font(DT.Font.body(.semibold))
+                    .foregroundStyle(DT.Text.primary)
 
-            // 工具名称标签
-            HStack(spacing: 6) {
                 Text(toolName)
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .font(DT.Font.footnote(.bold))
                     .foregroundStyle(Color(hex: agent.accentColor))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, DT.Space.sm)
+                    .padding(.vertical, DT.Space.xxs)
                     .background(
                         Color(hex: agent.accentColor).opacity(0.1),
-                        in: RoundedRectangle(cornerRadius: 4)
+                        in: RoundedRectangle(cornerRadius: DT.Radius.sm)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 4)
+                        RoundedRectangle(cornerRadius: DT.Radius.sm)
                             .stroke(Color(hex: agent.accentColor).opacity(0.2), lineWidth: 1)
                     )
+
+                Spacer()
             }
 
             // 描述
             Text(description)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(Color(hex: "#AAAAAA"))
+                .font(DT.Font.footnote())
+                .foregroundStyle(DT.Text.secondary)
                 .lineLimit(3)
-                .padding(8)
+                .padding(.horizontal, DT.Space.md)
+                .padding(.vertical, DT.Space.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(hex: "#111111"), in: RoundedRectangle(cornerRadius: 6))
+                .background(DT.Surface.overlay, in: RoundedRectangle(cornerRadius: DT.Radius.sm))
 
             // 操作按钮
-            HStack(spacing: 8) {
+            HStack(spacing: DT.Space.md) {
                 Button(action: {
                     SoundManager.shared.playApproved()
                     viewModel.approvePermission(sessionId: sessionId, requestId: requestId)
                 }) {
-                    HStack(spacing: 4) {
+                    HStack(spacing: DT.Space.xs) {
                         Image(systemName: "checkmark")
                             .font(.system(size: 10, weight: .bold))
                         Text("Allow")
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .font(DT.Font.footnote(.semibold))
                         Text("⌘Y")
-                            .font(.system(size: 8, design: .monospaced))
+                            .font(DT.Font.caption())
                             .foregroundStyle(.white.opacity(0.5))
                     }
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, DT.Space.lg)
+                    .padding(.vertical, 5)
                     .background(
                         LinearGradient(
-                            colors: [Color(hex: "#22C55E"), Color(hex: "#16A34A")],
+                            colors: [DT.Status.success, DT.Status.successDark],
                             startPoint: .top, endPoint: .bottom
                         ),
-                        in: RoundedRectangle(cornerRadius: 6)
+                        in: RoundedRectangle(cornerRadius: DT.Radius.sm)
                     )
-                    .shadow(color: Color(hex: "#22C55E").opacity(0.2), radius: 4, y: 1)
+                    .shadow(color: DT.Status.success.opacity(0.2), radius: DT.Shadow.smRadius, y: DT.Shadow.smY)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ScaleButtonStyle())
 
                 Button(action: {
                     SoundManager.shared.playDenied()
                     viewModel.denyPermission(sessionId: sessionId, requestId: requestId)
                 }) {
-                    HStack(spacing: 4) {
+                    HStack(spacing: DT.Space.xs) {
                         Image(systemName: "xmark")
                             .font(.system(size: 10, weight: .bold))
                         Text("Deny")
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .font(DT.Font.footnote(.semibold))
                         Text("⌘N")
-                            .font(.system(size: 8, design: .monospaced))
+                            .font(DT.Font.caption())
                             .foregroundStyle(.white.opacity(0.5))
                     }
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, DT.Space.lg)
+                    .padding(.vertical, 5)
                     .background(
-                        Color(hex: "#DC2626").opacity(0.8),
-                        in: RoundedRectangle(cornerRadius: 6)
+                        DT.Status.danger.opacity(0.85),
+                        in: RoundedRectangle(cornerRadius: DT.Radius.sm)
                     )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ScaleButtonStyle())
 
                 Spacer()
             }
         }
     }
 
-    // MARK: - 问题
+    // MARK: - Question
 
     private func questionView(
         sessionId: String, requestId: String,
         agent: AgentKind, question: String, options: [String]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color(hex: "#3B82F6"))
+        VStack(alignment: .leading, spacing: DT.Space.md) {
+            HStack(spacing: DT.Space.sm) {
+                RoundedRectangle(cornerRadius: DT.Space.xxs)
+                    .fill(DT.Status.info)
                     .frame(width: 3, height: 16)
                 Image(systemName: "questionmark.circle.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(Color(hex: "#3B82F6"))
+                    .foregroundStyle(DT.Status.info)
                 Text(agent.displayName)
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white)
+                    .font(DT.Font.body(.semibold))
+                    .foregroundStyle(DT.Text.primary)
                 Text("asks")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(Color(hex: "#888888"))
+                    .font(DT.Font.footnote())
+                    .foregroundStyle(DT.Text.tertiary)
             }
 
             Text(question)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Color(hex: "#E5E5E5"))
+                .font(DT.Font.body())
+                .foregroundStyle(DT.Text.secondary)
                 .lineSpacing(2)
 
             if !options.isEmpty {
-                FlowLayout(spacing: 6) {
+                FlowLayout(spacing: DT.Space.sm) {
                     ForEach(Array(options.enumerated()), id: \.offset) { index, option in
                         Button(action: {
                             viewModel.answerQuestion(
                                 sessionId: sessionId, requestId: requestId, answer: option
                             )
                         }) {
-                            HStack(spacing: 4) {
+                            HStack(spacing: DT.Space.xs) {
                                 Text("⌘\(index + 1)")
-                                    .font(.system(size: 8, design: .monospaced))
-                                    .foregroundStyle(Color(hex: "#3B82F6").opacity(0.6))
+                                    .font(DT.Font.caption())
+                                    .foregroundStyle(DT.Status.info.opacity(0.6))
                                 Text(option)
-                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(.white)
+                                    .font(DT.Font.footnote(.medium))
+                                    .foregroundStyle(DT.Text.primary)
                             }
                             .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color(hex: "#111111"), in: RoundedRectangle(cornerRadius: 6))
+                            .padding(.vertical, DT.Space.sm)
+                            .background(DT.Surface.overlay, in: RoundedRectangle(cornerRadius: DT.Radius.sm))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color(hex: "#3B82F6").opacity(0.2), lineWidth: 1)
+                                RoundedRectangle(cornerRadius: DT.Radius.sm)
+                                    .stroke(DT.Status.info.opacity(0.2), lineWidth: 1)
                             )
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(ScaleButtonStyle())
                     }
                 }
             } else {
-                HStack(spacing: 6) {
-                    TextField("输入回答...", text: $answerText)
+                HStack(spacing: DT.Space.sm) {
+                    TextField("Type your answer...", text: $answerText)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white)
+                        .font(DT.Font.footnote())
+                        .foregroundStyle(DT.Text.primary)
                         .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color(hex: "#111111"), in: RoundedRectangle(cornerRadius: 6))
+                        .padding(.vertical, DT.Space.sm)
+                        .background(DT.Surface.overlay, in: RoundedRectangle(cornerRadius: DT.Radius.sm))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(Color(hex: "#333333"), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: DT.Radius.sm)
+                                .stroke(DT.Border.default, lineWidth: 1)
                         )
 
                     Button(action: {
@@ -226,46 +234,59 @@ struct PendingEventCard: View {
                     }) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.system(size: 18))
-                            .foregroundStyle(Color(hex: "#3B82F6"))
+                            .foregroundStyle(DT.Status.info)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ScaleButtonStyle())
                 }
             }
         }
     }
 
-    // MARK: - 通知
+    // MARK: - Notification
 
     private func notificationView(agent: AgentKind, level: String, message: String) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DT.Space.md) {
             Image(systemName: notificationIcon(level))
                 .font(.system(size: 12))
                 .foregroundStyle(notificationColor(level))
                 .shadow(color: notificationColor(level).opacity(0.3), radius: 3)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: DT.Space.xxs) {
                 Text(agent.displayName)
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white)
+                    .font(DT.Font.footnote(.bold))
+                    .foregroundStyle(DT.Text.primary)
                 Text(message)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(Color(hex: "#AAAAAA"))
+                    .font(DT.Font.footnote())
+                    .foregroundStyle(DT.Text.secondary)
                     .lineLimit(2)
             }
             Spacer()
         }
     }
 
-    // MARK: - 辅助
+    // MARK: - Helpers
+
+    private var cardBackground: Color {
+        switch event {
+        case .permissionRequest: DT.Surface.warmCard
+        case .question: DT.Surface.coolCard
+        case .notification(_, _, let level, _):
+            switch level {
+            case "error": DT.Surface.dangerCard
+            case "warning": DT.Surface.warningCard
+            default: DT.Surface.raised
+            }
+        }
+    }
 
     private var borderColor: Color {
         switch event {
         case .permissionRequest(_, _, let agent, _, _):
             Color(hex: agent.accentColor)
         case .question:
-            Color(hex: "#3B82F6")
+            DT.Status.info
         case .notification:
-            Color(hex: "#333333")
+            DT.Border.default
         }
     }
 
@@ -280,10 +301,10 @@ struct PendingEventCard: View {
 
     private func notificationColor(_ level: String) -> Color {
         switch level {
-        case "success": Color(hex: "#22C55E")
-        case "error": Color(hex: "#EF4444")
-        case "warning": Color(hex: "#F59E0B")
-        default: Color(hex: "#3B82F6")
+        case "success": DT.Status.success
+        case "error": DT.Status.danger
+        case "warning": DT.Status.warning
+        default: DT.Status.info
         }
     }
 }
@@ -291,7 +312,7 @@ struct PendingEventCard: View {
 // MARK: - FlowLayout
 
 struct FlowLayout: Layout {
-    var spacing: CGFloat = 6
+    var spacing: CGFloat = DT.Space.sm
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         arrangeSubviews(proposal: proposal, subviews: subviews).size

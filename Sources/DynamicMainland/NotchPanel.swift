@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// 刘海区域的浮动面板 — 深色半透明，非激活式
+/// 刘海区域的浮动面板 — 深色圆角，非激活式
 final class NotchPanel: NSPanel {
     init(contentView: NSView) {
         super.init(
@@ -22,12 +22,12 @@ final class NotchPanel: NSPanel {
         self.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         self.isReleasedWhenClosed = false
 
-        // 深色圆角
+        // 圆角和边框
         self.contentView?.wantsLayer = true
-        self.contentView?.layer?.cornerRadius = 14
+        self.contentView?.layer?.cornerRadius = 12  // DT.Radius.lg
         self.contentView?.layer?.masksToBounds = true
         self.contentView?.layer?.borderWidth = 1
-        self.contentView?.layer?.borderColor = NSColor(white: 0.2, alpha: 0.5).cgColor
+        self.contentView?.layer?.borderColor = NSColor(white: 0.15, alpha: 0.5).cgColor
 
         positionNearNotch()
     }
@@ -56,7 +56,8 @@ final class NotchPanel: NSPanel {
     func toggle() {
         if isVisible {
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.15
+                ctx.duration = 0.2
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 self.animator().alphaValue = 0
             } completionHandler: {
                 self.orderOut(nil)
@@ -67,7 +68,8 @@ final class NotchPanel: NSPanel {
             alphaValue = 0
             orderFrontRegardless()
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.15
+                ctx.duration = 0.2
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 self.animator().alphaValue = 1
             }
         }

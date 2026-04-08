@@ -1,18 +1,18 @@
 import SwiftUI
 
-/// 单个 Agent 会话行 — 深色卡片风格
+/// 单个 Agent 会话行 — 设计令牌驱动
 struct SessionRowView: View {
     let session: AgentSession
     let viewModel: AgentViewModel
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DT.Space.md) {
             // Agent 标识色条
-            RoundedRectangle(cornerRadius: 2)
+            RoundedRectangle(cornerRadius: DT.Space.xxs)
                 .fill(Color(hex: session.agent.accentColor))
                 .frame(width: 3, height: 32)
-                .shadow(color: Color(hex: session.agent.accentColor).opacity(0.4), radius: 4)
+                .shadow(color: Color(hex: session.agent.accentColor).opacity(0.4), radius: DT.Shadow.smRadius)
 
             // Agent 图标
             Image(systemName: session.agent.iconName)
@@ -21,34 +21,38 @@ struct SessionRowView: View {
                 .frame(width: 24, height: 24)
 
             // 信息
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: DT.Space.xs) {
+                HStack(spacing: DT.Space.sm) {
                     Text(session.agent.displayName)
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.white)
+                        .font(DT.Font.body(.semibold))
+                        .foregroundStyle(DT.Text.primary)
 
                     Text(session.terminalApp)
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                        .foregroundStyle(Color(hex: "#666666"))
+                        .font(DT.Font.caption())
+                        .foregroundStyle(DT.Text.tertiary)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(Color(hex: "#1A1A1A"), in: RoundedRectangle(cornerRadius: 3))
+                        .background(DT.Surface.raised, in: RoundedRectangle(cornerRadius: DT.Radius.xs))
                 }
 
-                HStack(spacing: 4) {
-                    statusDot
+                HStack(spacing: DT.Space.xs) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 5, height: 5)
+                        .shadow(color: statusColor.opacity(0.5), radius: 2)
+
                     if let action = session.currentAction {
                         Image(systemName: action.iconName)
                             .font(.system(size: 8))
-                            .foregroundStyle(Color(hex: "#888888"))
+                            .foregroundStyle(DT.Text.tertiary)
                         Text(action.description)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(Color(hex: "#888888"))
+                            .font(DT.Font.caption())
+                            .foregroundStyle(DT.Text.tertiary)
                             .lineLimit(1)
                     } else {
                         Text(statusText)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(Color(hex: "#666666"))
+                            .font(DT.Font.caption())
+                            .foregroundStyle(DT.Text.quaternary)
                     }
                 }
             }
@@ -57,29 +61,34 @@ struct SessionRowView: View {
 
             // 运行时间
             Text(session.elapsedTime)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(Color(hex: "#555555"))
+                .font(DT.Font.footnote())
+                .foregroundStyle(DT.Text.quaternary)
 
             // 跳转按钮
             Button(action: { viewModel.jumpToTerminal(sessionId: session.id) }) {
                 Image(systemName: "arrow.up.right.square")
                     .font(.system(size: 11))
-                    .foregroundStyle(isHovered ? .white : Color(hex: "#555555"))
+                    .foregroundStyle(isHovered ? DT.Text.primary : DT.Text.quaternary)
+                    .frame(width: 24, height: 24)
+                    .background(
+                        Circle()
+                            .fill(DT.Text.primary.opacity(isHovered ? 0.08 : 0))
+                    )
             }
             .buttonStyle(.plain)
-            .help("跳转到终端")
+            .help("Jump to terminal")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, DT.Space.lg)
+        .padding(.vertical, DT.Space.md)
         .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(hex: "#1A1A1A"))
+            RoundedRectangle(cornerRadius: DT.Radius.sm)
+                .fill(DT.Surface.raised)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: DT.Radius.sm)
                         .stroke(
                             isHovered
                                 ? Color(hex: session.agent.accentColor).opacity(0.3)
-                                : Color(hex: "#2A2A2A"),
+                                : DT.Border.default,
                             lineWidth: 1
                         )
                 )
@@ -91,21 +100,14 @@ struct SessionRowView: View {
         }
     }
 
-    private var statusDot: some View {
-        Circle()
-            .fill(statusColor)
-            .frame(width: 5, height: 5)
-            .shadow(color: statusColor.opacity(0.5), radius: 2)
-    }
-
     private var statusColor: Color {
         switch session.status {
-        case .active: .green
-        case .waitingPermission: .orange
-        case .waitingAnswer: Color(hex: "#3B82F6")
-        case .waitingPlanReview: Color(hex: "#A855F7")
-        case .idle: Color(hex: "#555555")
-        case .completed: .green.opacity(0.5)
+        case .active: DT.Status.success
+        case .waitingPermission: DT.Accent.brand
+        case .waitingAnswer: DT.Status.info
+        case .waitingPlanReview: DT.Status.purple
+        case .idle: DT.Text.quaternary
+        case .completed: DT.Status.success.opacity(0.5)
         }
     }
 

@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// 主内容视图 — 深色高级感设计
+/// 主内容视图 — 深色高级感设计，使用统一设计令牌
 struct ContentView: View {
     @Bindable var viewModel: AgentViewModel
 
     var body: some View {
         VStack(spacing: 0) {
             headerBar
-            Divider().opacity(0.2)
+            Divider().opacity(0.15)
 
             if !viewModel.hooksInstalled {
                 setupPrompt
@@ -22,8 +22,7 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             ZStack {
-                Color(hex: "#0D0D0D")
-                // 微妙的径向渐变光晕
+                DT.Surface.base
                 RadialGradient(
                     colors: [Color(hex: "#1a2332").opacity(0.4), .clear],
                     center: .topTrailing,
@@ -35,16 +34,16 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
     }
 
-    // MARK: - 顶部栏
+    // MARK: - Header
 
     private var headerBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DT.Space.md) {
             // Logo
             ZStack {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [Color(hex: "#E8825A"), Color(hex: "#D97757")],
+                            colors: [DT.Accent.brand, DT.Accent.brandDark],
                             startPoint: .topLeading, endPoint: .bottomTrailing
                         )
                     )
@@ -55,161 +54,198 @@ struct ContentView: View {
             }
 
             Text("Dynamic Mainland")
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                .foregroundStyle(.white)
+                .font(DT.Font.headline())
+                .foregroundStyle(DT.Text.primary)
 
             Spacer()
 
-            // 活跃会话计数器
+            // 活跃会话计数
             if !viewModel.sessions.isEmpty {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(.green)
-                        .frame(width: 5, height: 5)
-                        .shadow(color: .green.opacity(0.6), radius: 3)
+                HStack(spacing: DT.Space.xs) {
+                    PulsingDot(color: DT.Status.success, size: 5)
                     Text("\(viewModel.sessions.count) active")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(Color(hex: "#888888"))
+                        .font(DT.Font.footnote())
+                        .foregroundStyle(DT.Text.tertiary)
                 }
             }
 
             // 待处理事件徽章
             if !viewModel.pendingEvents.isEmpty {
                 Text("\(viewModel.pendingEvents.count)")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .font(DT.Font.caption(.bold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.red, in: Capsule())
-                    .shadow(color: .red.opacity(0.4), radius: 4)
+                    .padding(.horizontal, DT.Space.sm)
+                    .padding(.vertical, DT.Space.xxs)
+                    .background(DT.Status.danger, in: Capsule())
+                    .shadow(color: DT.Status.danger.opacity(0.4), radius: DT.Shadow.smRadius)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, DT.Space.lg)
+        .padding(.vertical, DT.Space.md)
     }
 
-    // MARK: - 底部状态栏
+    // MARK: - Footer
 
     private var footerBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: DT.Space.sm) {
             Image(systemName: "keyboard")
                 .font(.system(size: 9))
-                .foregroundStyle(Color(hex: "#555555"))
+                .foregroundStyle(DT.Text.quaternary)
             Text("⌥D toggle · ⌘Y allow · ⌘N deny")
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
-                .foregroundStyle(Color(hex: "#555555"))
+                .font(DT.Font.caption())
+                .foregroundStyle(DT.Text.quaternary)
             Spacer()
-            Text("v0.1.0")
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(Color(hex: "#333333"))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-        .background(Color(hex: "#0A0A0A"))
+        .padding(.horizontal, DT.Space.lg)
+        .padding(.vertical, DT.Space.sm)
+        .background(DT.Surface.sunken)
     }
 
-    // MARK: - 会话列表
+    // MARK: - Session List
 
     private var sessionList: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(spacing: 6) {
-                // 待处理事件优先
+            LazyVStack(spacing: DT.Space.md) {
+                // 待处理事件（优先）
                 ForEach(viewModel.pendingEvents) { event in
-                    PendingEventCard(event: event, viewModel: viewModel)
-                        .transition(.asymmetric(
-                            insertion: .push(from: .top).combined(with: .opacity),
-                            removal: .push(from: .bottom).combined(with: .opacity)
-                        ))
+                    PendingEventCard(
+                        event: event,
+                        viewModel: viewModel,
+                        isKeyboardTarget: event.id == viewModel.pendingEvents.first?.id
+                    )
+                    .transition(.asymmetric(
+                        insertion: .push(from: .top).combined(with: .opacity),
+                        removal: .push(from: .bottom).combined(with: .opacity)
+                    ))
+                }
+
+                // 分区标题
+                if !viewModel.pendingEvents.isEmpty && !viewModel.sessions.isEmpty {
+                    HStack {
+                        Text("SESSIONS")
+                            .font(DT.Font.caption(.bold))
+                            .foregroundStyle(DT.Text.quaternary)
+                            .tracking(1.5)
+                        Spacer()
+                    }
+                    .padding(.horizontal, DT.Space.xs)
+                    .padding(.top, DT.Space.xs)
                 }
 
                 // 活跃会话
                 ForEach(viewModel.sessions) { session in
                     SessionRowView(session: session, viewModel: viewModel)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, DT.Space.lg)
+            .padding(.vertical, DT.Space.md)
         }
-        .animation(.easeInOut(duration: 0.2), value: viewModel.sessions.count)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.pendingEvents.count)
+        .animation(.spring(duration: 0.3, bounce: 0.15), value: viewModel.sessions.count)
+        .animation(.spring(duration: 0.3, bounce: 0.15), value: viewModel.pendingEvents.count)
     }
 
-    // MARK: - 空状态
+    // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: DT.Space.xl) {
             Spacer()
 
             ZStack {
-                // 脉冲动画圈
                 Circle()
-                    .stroke(Color(hex: "#333333"), lineWidth: 1)
+                    .stroke(DT.Border.default, lineWidth: 1)
                     .frame(width: 70, height: 70)
                 Circle()
-                    .stroke(Color(hex: "#222222"), lineWidth: 1)
+                    .stroke(DT.Border.subtle, lineWidth: 1)
                     .frame(width: 90, height: 90)
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(.system(size: 28))
-                    .foregroundStyle(Color(hex: "#444444"))
+                    .foregroundStyle(DT.Text.quaternary)
+                    .symbolEffect(.pulse, options: .repeating)
             }
 
-            Text("Waiting for agents...")
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .foregroundStyle(Color(hex: "#666666"))
+            VStack(spacing: DT.Space.md) {
+                Text("Waiting for agents...")
+                    .font(DT.Font.headline(.medium))
+                    .foregroundStyle(DT.Text.tertiary)
 
-            Text("启动 AI 编码代理后，会话将自动出现")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Color(hex: "#444444"))
-                .multilineTextAlignment(.center)
+                Text("Run claude, codex, or cursor in terminal")
+                    .font(DT.Font.body())
+                    .foregroundStyle(DT.Text.quaternary)
+                    .multilineTextAlignment(.center)
+            }
 
             Spacer()
         }
         .padding()
     }
 
-    // MARK: - 安装引导
+    // MARK: - Setup Prompt
 
     private var setupPrompt: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: DT.Space.xxl) {
             Spacer()
 
             Image(systemName: "wrench.and.screwdriver")
                 .font(.system(size: 32))
-                .foregroundStyle(Color(hex: "#D97757"))
-                .shadow(color: Color(hex: "#D97757").opacity(0.3), radius: 8)
+                .foregroundStyle(DT.Accent.brand)
+                .shadow(color: DT.Accent.brand.opacity(0.3), radius: DT.Shadow.mdRadius)
 
-            Text("Install Hooks")
-                .font(.system(size: 16, weight: .bold, design: .monospaced))
-                .foregroundStyle(.white)
+            VStack(spacing: DT.Space.md) {
+                Text("Install Hooks")
+                    .font(DT.Font.title())
+                    .foregroundStyle(DT.Text.primary)
 
-            Text("需要在 AI Agent 配置中安装 hook\n才能监控和控制代理操作")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Color(hex: "#888888"))
-                .multilineTextAlignment(.center)
-                .lineSpacing(3)
+                Text("Install hooks in AI agent configs\nto monitor and control operations")
+                    .font(DT.Font.body())
+                    .foregroundStyle(DT.Text.tertiary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
 
             Button(action: { viewModel.installHooks() }) {
-                HStack(spacing: 6) {
+                HStack(spacing: DT.Space.sm) {
                     Image(systemName: "bolt.fill")
-                    Text("一键安装")
+                    Text("Install Now")
                 }
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(DT.Font.subheadline())
                 .foregroundStyle(.white)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, DT.Space.xxl)
                 .padding(.vertical, 10)
                 .background(
                     LinearGradient(
-                        colors: [Color(hex: "#D97757"), Color(hex: "#C4603F")],
+                        colors: [DT.Accent.brand, DT.Accent.brandDark],
                         startPoint: .top, endPoint: .bottom
                     ),
-                    in: RoundedRectangle(cornerRadius: 8)
+                    in: RoundedRectangle(cornerRadius: DT.Radius.sm)
                 )
-                .shadow(color: Color(hex: "#D97757").opacity(0.3), radius: 6, y: 2)
+                .shadow(color: DT.Accent.brand.opacity(0.3), radius: DT.Shadow.smRadius, y: DT.Shadow.smY)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ScaleButtonStyle())
 
             Spacer()
         }
         .padding()
+    }
+}
+
+// MARK: - 脉冲圆点
+
+struct PulsingDot: View {
+    let color: Color
+    let size: CGFloat
+
+    @State private var isPulsing = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: size, height: size)
+            .shadow(color: color.opacity(isPulsing ? 0.7 : 0.3), radius: isPulsing ? 4 : 2)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
+                    isPulsing = true
+                }
+            }
     }
 }
