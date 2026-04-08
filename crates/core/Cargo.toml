@@ -1,0 +1,13 @@
+[package]
+name = "dynamic-mainland-core"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "dynamic_mainland_core"
+crate-type = ["staticlib", "lib"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+dirs = "6"

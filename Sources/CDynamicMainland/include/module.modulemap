@@ -1,0 +1,4 @@
+module CDynamicMainland {
+    header "dynamic_mainland.h"
+    export *
+}
