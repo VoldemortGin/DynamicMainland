@@ -101,9 +101,28 @@ pub enum PendingEvent {
     },
 }
 
+impl PendingEvent {
+    fn request_id(&self) -> Option<&str> {
+        match self {
+            PendingEvent::PermissionRequest { request_id, .. }
+            | PendingEvent::Question { request_id, .. } => Some(request_id),
+            PendingEvent::Notification { .. } => None,
+        }
+    }
+}
+
+/// 待处理事件及其入队时间（内部记录，不参与序列化）
+struct PendingEntry {
+    created_at_secs: u64,
+    event: PendingEvent,
+}
+
+/// notification 类事件的最长存活时间（无 waiter，靠 TTL 和会话清理了结）
+const NOTIFICATION_TTL_SECS: u64 = 300;
+
 pub struct Server {
     session_mgr: SessionManager,
-    pending_events: Arc<std::sync::Mutex<Vec<PendingEvent>>>,
+    pending_events: Arc<std::sync::Mutex<Vec<PendingEntry>>>,
     /// 等待 UI 响应的权限请求: request_id -> Sender<bool>
     permission_waiters: Arc<std::sync::Mutex<std::collections::HashMap<String, mpsc::Sender<bool>>>>,
     /// 等待 UI 响应的问题: request_id -> Sender<String>
@@ -139,24 +158,50 @@ impl Server {
 
     pub fn get_pending_events_json(&self) -> String {
         let events = self.pending_events.lock().unwrap();
-        serde_json::to_string(&*events).unwrap_or_else(|_| "[]".to_string())
+        let list: Vec<&PendingEvent> = events.iter().map(|e| &e.event).collect();
+        serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string())
     }
 
     pub fn drain_pending_events(&self) -> Vec<PendingEvent> {
         let mut events = self.pending_events.lock().unwrap();
-        std::mem::take(&mut *events)
+        events.drain(..).map(|e| e.event).collect()
     }
 
     pub fn respond_permission(&self, request_id: &str, approved: bool) {
         if let Some(tx) = self.permission_waiters.lock().unwrap().remove(request_id) {
             let _ = tx.send(approved);
         }
+        remove_pending_by_request_id(&self.pending_events, request_id);
     }
 
     pub fn respond_question(&self, request_id: &str, answer: &str) {
         if let Some(tx) = self.question_waiters.lock().unwrap().remove(request_id) {
             let _ = tx.send(answer.to_string());
         }
+        remove_pending_by_request_id(&self.pending_events, request_id);
+    }
+
+    /// 清理已了结 / 过期的待处理事件：
+    /// - 权限请求 / 问题：waiter 已不存在（已响应或已超时）即移除
+    /// - notification：所属会话已清理或超过 TTL 即移除
+    fn prune_pending_events(&self) {
+        let live_sessions: std::collections::HashSet<String> =
+            self.session_mgr.session_ids().into_iter().collect();
+        let now = now_secs();
+        // 先锁 pending 再锁 waiters；其余代码从不同时持有两把锁，不会死锁
+        let mut events = self.pending_events.lock().unwrap();
+        let perm_waiters = self.permission_waiters.lock().unwrap();
+        let q_waiters = self.question_waiters.lock().unwrap();
+        events.retain(|entry| match &entry.event {
+            PendingEvent::PermissionRequest { request_id, .. } => {
+                perm_waiters.contains_key(request_id)
+            }
+            PendingEvent::Question { request_id, .. } => q_waiters.contains_key(request_id),
+            PendingEvent::Notification { session_id, .. } => {
+                live_sessions.contains(session_id)
+                    && now.saturating_sub(entry.created_at_secs) < NOTIFICATION_TTL_SECS
+            }
+        });
     }
 
     /// 启动 socket 服务器（阻塞当前线程）
@@ -209,8 +254,9 @@ impl Server {
                 }
             }
 
-            // 定期清理超时会话（5 分钟无活动）
+            // 定期清理超时会话（5 分钟无活动）及已了结的待处理事件
             self.session_mgr.cleanup_stale(300);
+            self.prune_pending_events();
         }
 
         let _ = std::fs::remove_file(&self.socket_path);
@@ -229,7 +275,7 @@ impl Server {
 fn handle_connection(
     stream: UnixStream,
     session_mgr: SessionManager,
-    pending_events: Arc<std::sync::Mutex<Vec<PendingEvent>>>,
+    pending_events: Arc<std::sync::Mutex<Vec<PendingEntry>>>,
     permission_waiters: Arc<std::sync::Mutex<std::collections::HashMap<String, mpsc::Sender<bool>>>>,
     question_waiters: Arc<std::sync::Mutex<std::collections::HashMap<String, mpsc::Sender<String>>>>,
 ) {
@@ -278,10 +324,25 @@ fn handle_connection(
     }
 }
 
+fn remove_pending_by_request_id(
+    pending_events: &std::sync::Mutex<Vec<PendingEntry>>,
+    request_id: &str,
+) {
+    let mut events = pending_events.lock().unwrap();
+    events.retain(|e| e.event.request_id() != Some(request_id));
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 fn process_event(
     event: HookEvent,
     session_mgr: &SessionManager,
-    pending_events: &Arc<std::sync::Mutex<Vec<PendingEvent>>>,
+    pending_events: &Arc<std::sync::Mutex<Vec<PendingEntry>>>,
     permission_waiters: &Arc<std::sync::Mutex<std::collections::HashMap<String, mpsc::Sender<bool>>>>,
     question_waiters: &Arc<std::sync::Mutex<std::collections::HashMap<String, mpsc::Sender<String>>>>,
 ) -> HookResponse {
@@ -340,16 +401,16 @@ fn process_event(
                 .insert(request_id.clone(), tx);
 
             // 推送待处理事件给 UI
-            pending_events
-                .lock()
-                .unwrap()
-                .push(PendingEvent::PermissionRequest {
+            pending_events.lock().unwrap().push(PendingEntry {
+                created_at_secs: now_secs(),
+                event: PendingEvent::PermissionRequest {
                     session_id: session_id.clone(),
                     request_id: request_id.clone(),
                     agent,
                     tool_name,
                     description,
-                });
+                },
+            });
 
             session_mgr.update_status(&session_id, SessionStatus::WaitingPermission);
 
@@ -362,6 +423,7 @@ fn process_event(
                 Err(_) => {
                     // 超时，默认拒绝
                     permission_waiters.lock().unwrap().remove(&request_id);
+                    remove_pending_by_request_id(pending_events, &request_id);
                     session_mgr.clear_pending(&session_id);
                     HookResponse::Permission { approved: false }
                 }
@@ -396,16 +458,16 @@ fn process_event(
                 .unwrap()
                 .insert(request_id.clone(), tx);
 
-            pending_events
-                .lock()
-                .unwrap()
-                .push(PendingEvent::Question {
+            pending_events.lock().unwrap().push(PendingEntry {
+                created_at_secs: now_secs(),
+                event: PendingEvent::Question {
                     session_id: session_id.clone(),
                     request_id: request_id.clone(),
                     agent,
                     question,
                     options,
-                });
+                },
+            });
 
             session_mgr.update_status(&session_id, SessionStatus::WaitingAnswer);
 
@@ -416,6 +478,7 @@ fn process_event(
                 }
                 Err(_) => {
                     question_waiters.lock().unwrap().remove(&request_id);
+                    remove_pending_by_request_id(pending_events, &request_id);
                     session_mgr.clear_pending(&session_id);
                     HookResponse::Error {
                         message: "响应超时".to_string(),
@@ -434,15 +497,15 @@ fn process_event(
                 .map(|s| s.agent)
                 .unwrap_or(AgentKind::ClaudeCode);
 
-            pending_events
-                .lock()
-                .unwrap()
-                .push(PendingEvent::Notification {
+            pending_events.lock().unwrap().push(PendingEntry {
+                created_at_secs: now_secs(),
+                event: PendingEvent::Notification {
                     session_id,
                     agent,
                     level,
                     message,
-                });
+                },
+            });
             HookResponse::Ack
         }
 
@@ -556,5 +619,212 @@ fn parse_tool_action(tool_name: &str, input: &serde_json::Value) -> ToolAction {
                 .take(100)
                 .collect(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn make_session(id: &str) -> Session {
+        let now = now_secs();
+        Session {
+            id: id.to_string(),
+            agent: AgentKind::ClaudeCode,
+            terminal_id: "t1".to_string(),
+            terminal_app: "Terminal".to_string(),
+            working_dir: "/tmp".to_string(),
+            status: SessionStatus::Active,
+            current_action: None,
+            pending_permission: None,
+            pending_question: None,
+            pending_plan: None,
+            started_at_secs: now,
+            last_activity_secs: now,
+        }
+    }
+
+    fn push_entry(server: &Server, created_at_secs: u64, event: PendingEvent) {
+        server.pending_events.lock().unwrap().push(PendingEntry {
+            created_at_secs,
+            event,
+        });
+    }
+
+    fn pending_count(server: &Server) -> usize {
+        server.pending_events.lock().unwrap().len()
+    }
+
+    #[test]
+    fn respond_permission_settles_event_and_wakes_waiter() {
+        let mgr = SessionManager::new();
+        let server = Server::new(mgr.clone());
+        mgr.upsert_session(make_session("s1"));
+
+        let pending = server.pending_events.clone();
+        let perm_waiters = server.permission_waiters.clone();
+        let q_waiters = server.question_waiters.clone();
+        let mgr2 = mgr.clone();
+        let handle = std::thread::spawn(move || {
+            process_event(
+                HookEvent::PreToolUse {
+                    session_id: "s1".to_string(),
+                    request_id: "r1".to_string(),
+                    tool_name: "Bash".to_string(),
+                    tool_input: serde_json::json!({"command": "ls"}),
+                },
+                &mgr2,
+                &pending,
+                &perm_waiters,
+                &q_waiters,
+            )
+        });
+
+        // 等待事件进入 pending_events
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while pending_count(&server) == 0 {
+            assert!(Instant::now() < deadline, "权限事件未出现在 pending_events 中");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        server.respond_permission("r1", true);
+        match handle.join().unwrap() {
+            HookResponse::Permission { approved } => assert!(approved),
+            other => panic!("非预期响应: {:?}", other),
+        }
+        assert_eq!(pending_count(&server), 0, "响应后事件应从 pending_events 移除");
+        assert!(server.permission_waiters.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn respond_without_waiter_is_noop() {
+        // 模拟「点 Allow 恰好撞上超时」：waiter 已被超时路径移除
+        let server = Server::new(SessionManager::new());
+        server.respond_permission("ghost", true);
+        server.respond_question("ghost", "answer");
+        assert_eq!(pending_count(&server), 0);
+    }
+
+    #[test]
+    fn prune_removes_settled_and_expired_events() {
+        let mgr = SessionManager::new();
+        let server = Server::new(mgr.clone());
+        mgr.upsert_session(make_session("alive"));
+        let now = now_secs();
+
+        // 1. 存活会话的新 notification -> 保留
+        push_entry(
+            &server,
+            now,
+            PendingEvent::Notification {
+                session_id: "alive".to_string(),
+                agent: AgentKind::ClaudeCode,
+                level: "info".to_string(),
+                message: "fresh".to_string(),
+            },
+        );
+        // 2. 超过 TTL 的 notification -> 移除
+        push_entry(
+            &server,
+            now.saturating_sub(NOTIFICATION_TTL_SECS + 1),
+            PendingEvent::Notification {
+                session_id: "alive".to_string(),
+                agent: AgentKind::ClaudeCode,
+                level: "info".to_string(),
+                message: "expired".to_string(),
+            },
+        );
+        // 3. 会话已清理的 notification -> 移除
+        push_entry(
+            &server,
+            now,
+            PendingEvent::Notification {
+                session_id: "dead".to_string(),
+                agent: AgentKind::ClaudeCode,
+                level: "info".to_string(),
+                message: "orphan".to_string(),
+            },
+        );
+        // 4. 无 waiter 的权限请求（已超时/已响应）-> 移除
+        push_entry(
+            &server,
+            now,
+            PendingEvent::PermissionRequest {
+                session_id: "alive".to_string(),
+                request_id: "r-done".to_string(),
+                agent: AgentKind::ClaudeCode,
+                tool_name: "Bash".to_string(),
+                description: "settled".to_string(),
+            },
+        );
+        // 5. 有 waiter 的权限请求 -> 保留
+        let (tx, _rx) = mpsc::channel();
+        server
+            .permission_waiters
+            .lock()
+            .unwrap()
+            .insert("r-waiting".to_string(), tx);
+        push_entry(
+            &server,
+            now,
+            PendingEvent::PermissionRequest {
+                session_id: "alive".to_string(),
+                request_id: "r-waiting".to_string(),
+                agent: AgentKind::ClaudeCode,
+                tool_name: "Bash".to_string(),
+                description: "waiting".to_string(),
+            },
+        );
+
+        server.prune_pending_events();
+
+        let events = server.pending_events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        let has = |pred: &dyn Fn(&PendingEvent) -> bool| events.iter().any(|e| pred(&e.event));
+        assert!(has(&|e| matches!(
+            e,
+            PendingEvent::Notification { message, .. } if message == "fresh"
+        )));
+        assert!(has(&|e| matches!(
+            e,
+            PendingEvent::PermissionRequest { request_id, .. } if request_id == "r-waiting"
+        )));
+    }
+
+    #[test]
+    fn remove_pending_by_request_id_only_removes_match() {
+        let server = Server::new(SessionManager::new());
+        let now = now_secs();
+        push_entry(
+            &server,
+            now,
+            PendingEvent::Question {
+                session_id: "s1".to_string(),
+                request_id: "q1".to_string(),
+                agent: AgentKind::ClaudeCode,
+                question: "?".to_string(),
+                options: vec![],
+            },
+        );
+        push_entry(
+            &server,
+            now,
+            PendingEvent::Notification {
+                session_id: "s1".to_string(),
+                agent: AgentKind::ClaudeCode,
+                level: "info".to_string(),
+                message: "keep".to_string(),
+            },
+        );
+
+        remove_pending_by_request_id(&server.pending_events, "q1");
+
+        let events = server.pending_events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0].event,
+            PendingEvent::Notification { message, .. } if message == "keep"
+        ));
     }
 }

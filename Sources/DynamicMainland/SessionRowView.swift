@@ -5,6 +5,7 @@ struct SessionRowView: View {
     let session: AgentSession
     let viewModel: AgentViewModel
     @State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: DT.Space.md) {
@@ -13,6 +14,7 @@ struct SessionRowView: View {
                 .fill(Color(hex: session.agent.accentColor))
                 .frame(width: 3, height: 32)
                 .shadow(color: Color(hex: session.agent.accentColor).opacity(0.4), radius: DT.Shadow.smRadius)
+                .accessibilityLabel(session.agent.displayName)
 
             // Agent 图标
             Image(systemName: session.agent.iconName)
@@ -40,6 +42,7 @@ struct SessionRowView: View {
                         .fill(statusColor)
                         .frame(width: 5, height: 5)
                         .shadow(color: statusColor.opacity(0.5), radius: 2)
+                        .accessibilityLabel(statusText)
 
                     if let action = session.currentAction {
                         Image(systemName: action.iconName)
@@ -60,9 +63,11 @@ struct SessionRowView: View {
             Spacer()
 
             // 运行时间
-            Text(session.elapsedTime)
-                .font(DT.Font.footnote())
-                .foregroundStyle(DT.Text.quaternary)
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                Text(session.elapsedTime)
+                    .font(DT.Font.footnote())
+                    .foregroundStyle(DT.Text.quaternary)
+            }
 
             // 跳转按钮
             Button(action: { viewModel.jumpToTerminal(sessionId: session.id) }) {
@@ -94,7 +99,7 @@ struct SessionRowView: View {
                 )
         )
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.15)) {
                 isHovered = hovering
             }
         }

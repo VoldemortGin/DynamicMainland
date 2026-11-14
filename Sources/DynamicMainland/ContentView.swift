@@ -3,35 +3,59 @@ import SwiftUI
 /// 主内容视图 — 深色高级感设计，使用统一设计令牌
 struct ContentView: View {
     @Bindable var viewModel: AgentViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         VStack(spacing: 0) {
             headerBar
             Divider().opacity(0.15)
 
-            if !viewModel.hooksInstalled {
-                setupPrompt
-            } else if viewModel.sessions.isEmpty && viewModel.pendingEvents.isEmpty {
-                emptyState
-            } else {
+            if !viewModel.sessions.isEmpty || !viewModel.pendingEvents.isEmpty {
+                // 有会话或待处理事件时优先显示，即使 hooks 未安装（如手动接入的 agent）
                 sessionList
+            } else if !viewModel.hooksInstalled {
+                setupPrompt
+            } else {
+                emptyState
             }
 
             footerBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
+        .background(panelBackground)
+        .preferredColorScheme(.dark)
+    }
+
+    // MARK: - Panel Background
+
+    /// 面板最外层背景：macOS 26+ 用系统玻璃材质（Liquid Glass），
+    /// 低版本或开启「降低透明度」时回退到原有不透明背景
+    @ViewBuilder
+    private var panelBackground: some View {
+        if #available(macOS 26.0, *), !reduceTransparency {
+            ZStack {
+                Color.clear
+                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: DT.Radius.lg))
+                // 玻璃之上保留一层半透明底色，保证小号等宽文字的对比度
+                DT.Surface.base.opacity(0.65)
+                backgroundGradient
+            }
+        } else {
             ZStack {
                 DT.Surface.base
-                RadialGradient(
-                    colors: [Color(hex: "#1a2332").opacity(0.4), .clear],
-                    center: .topTrailing,
-                    startRadius: 0,
-                    endRadius: 300
-                )
+                backgroundGradient
             }
+        }
+    }
+
+    private var backgroundGradient: some View {
+        RadialGradient(
+            colors: [Color(hex: "#1a2332").opacity(0.4), .clear],
+            center: .topTrailing,
+            startRadius: 0,
+            endRadius: 300
         )
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Header
@@ -91,7 +115,7 @@ struct ContentView: View {
             Image(systemName: "keyboard")
                 .font(.system(size: 9))
                 .foregroundStyle(DT.Text.quaternary)
-            Text("⌥D toggle · ⌘Y allow · ⌘N deny")
+            Text("⌃⌥D toggle · ⌃⌥Y allow · ⌃⌥N deny")
                 .font(DT.Font.caption())
                 .foregroundStyle(DT.Text.quaternary)
             Spacer()
@@ -111,7 +135,8 @@ struct ContentView: View {
                     PendingEventCard(
                         event: event,
                         viewModel: viewModel,
-                        isKeyboardTarget: event.id == viewModel.pendingEvents.first?.id
+                        isKeyboardTarget: event.id == (viewModel.firstPermissionRequest?.requestId
+                            ?? viewModel.pendingEvents.first?.id)
                     )
                     .transition(.asymmetric(
                         insertion: .push(from: .top).combined(with: .opacity),
@@ -141,8 +166,8 @@ struct ContentView: View {
             .padding(.horizontal, DT.Space.lg)
             .padding(.vertical, DT.Space.md)
         }
-        .animation(.spring(duration: 0.3, bounce: 0.15), value: viewModel.sessions.count)
-        .animation(.spring(duration: 0.3, bounce: 0.15), value: viewModel.pendingEvents.count)
+        .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.15), value: viewModel.sessions.count)
+        .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.15), value: viewModel.pendingEvents.count)
     }
 
     // MARK: - Empty State
@@ -161,7 +186,7 @@ struct ContentView: View {
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(.system(size: 28))
                     .foregroundStyle(DT.Text.quaternary)
-                    .symbolEffect(.pulse, options: .repeating)
+                    .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
             }
 
             VStack(spacing: DT.Space.md) {
@@ -236,6 +261,7 @@ struct PulsingDot: View {
     let size: CGFloat
 
     @State private var isPulsing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Circle()
@@ -243,6 +269,7 @@ struct PulsingDot: View {
             .frame(width: size, height: size)
             .shadow(color: color.opacity(isPulsing ? 0.7 : 0.3), radius: isPulsing ? 4 : 2)
             .onAppear {
+                guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
                     isPulsing = true
                 }

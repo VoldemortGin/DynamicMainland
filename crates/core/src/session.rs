@@ -174,6 +174,10 @@ impl SessionManager {
     pub fn session_count(&self) -> usize {
         self.sessions.lock().unwrap().len()
     }
+
+    pub fn session_ids(&self) -> Vec<String> {
+        self.sessions.lock().unwrap().keys().cloned().collect()
+    }
 }
 
 fn elapsed_secs() -> u64 {

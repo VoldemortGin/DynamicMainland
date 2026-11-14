@@ -29,11 +29,27 @@ final class NotchPanel: NSPanel {
         self.contentView?.layer?.borderWidth = 1
         self.contentView?.layer?.borderColor = NSColor(white: 0.15, alpha: 0.5).cgColor
 
+        // 插拔显示器/合盖/改分辨率后重新定位
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersDidChange),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+
         positionNearNotch()
     }
 
+    @objc private func screenParametersDidChange() {
+        if isVisible {
+            positionNearNotch()
+        }
+    }
+
     func positionNearNotch() {
-        guard let screen = NSScreen.main else { return }
+        // 优先选带刘海的屏幕，没有则回退到主屏
+        let notchScreen = NSScreen.screens.first { $0.safeAreaInsets.top > 0 }
+        guard let screen = notchScreen ?? NSScreen.main else { return }
 
         let screenFrame = screen.frame
         let visibleFrame = screen.visibleFrame

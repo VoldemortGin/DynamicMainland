@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 /// DynamicMainland — AI Agent 刘海控制面板
@@ -14,15 +15,33 @@ struct DynamicMainlandApp {
     }
 }
 
+/// 让非激活面板上的第一次点击直接触发控件，而不是仅用于让窗口获得焦点
+private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var panel: NotchPanel!
     private let viewModel = AgentViewModel()
+    private var togglePanelHotKey: GlobalHotKey?
+    private var allowHotKey: GlobalHotKey?
+    private var denyHotKey: GlobalHotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusBar()
         setupPanel()
         setupKeyboardShortcuts()
+
+        // 菜单栏图标旁显示待处理事件数量
+        viewModel.onPendingCountChange = { [weak self] count in
+            self?.statusItem.button?.title = count > 0 ? " \(count)" : ""
+        }
+
+        // 仅当存在待处理权限请求时注册 ⌃⌥Y / ⌃⌥N，平时不占用组合键
+        viewModel.onPendingEventsChange = { [weak self] events in
+            self?.updatePermissionHotKeys(for: events)
+        }
 
         viewModel.start()
     }
@@ -42,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             accessibilityDescription: "DynamicMainland"
         )
         button.image?.size = NSSize(width: 16, height: 16)
+        button.imagePosition = .imageLeading
         button.action = #selector(statusBarClicked(_:))
         button.target = self
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -79,17 +99,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupPanel() {
         let contentView = ContentView(viewModel: viewModel)
-        let hostingView = NSHostingView(rootView: contentView)
+        let hostingView = FirstMouseHostingView(rootView: contentView)
+        // 面板是 .titled + fullSizeContentView，不让标题栏安全区把内容往下推出一条透明带
+        hostingView.safeAreaRegions = []
         panel = NotchPanel(contentView: hostingView)
     }
 
     // MARK: - 键盘快捷键
 
     private func setupKeyboardShortcuts() {
-        // Option + D: 切换面板
-        NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.handleGlobalKey(event)
+        // ⌃⌥D: 切换面板（系统级热键，无需辅助功能授权）
+        // macOS 15+ 起仅含 ⌥ / ⌥⇧ 的 Carbon 热键注册成功但不会触发，必须带 ⌃ 或 ⌘
+        togglePanelHotKey = GlobalHotKey(
+            keyCode: UInt32(kVK_ANSI_D),
+            modifiers: UInt32(controlKey | optionKey)
+        ) { [weak self] in
+            self?.panel.toggle()
         }
+
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if self?.handleLocalKey(event) == true { return nil }
             return event
@@ -104,16 +131,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func handleGlobalKey(_ event: NSEvent) {
-        // Option + D
-        if event.modifierFlags.contains(.option) && event.keyCode == 2 {
-            panel.toggle()
+    /// 存在待处理权限请求时注册 ⌃⌥Y / ⌃⌥N 系统级热键，没有时注销
+    private func updatePermissionHotKeys(for events: [PendingEvent]) {
+        let hasPermissionRequest = events.contains {
+            if case .permissionRequest = $0 { return true }
+            return false
+        }
+
+        if hasPermissionRequest {
+            guard allowHotKey == nil && denyHotKey == nil else { return }
+            allowHotKey = GlobalHotKey(
+                keyCode: UInt32(kVK_ANSI_Y),
+                modifiers: UInt32(controlKey | optionKey)
+            ) { [weak self] in
+                guard let self, let target = self.viewModel.firstPermissionRequest else { return }
+                self.viewModel.approvePermission(sessionId: target.sessionId, requestId: target.requestId)
+            }
+            denyHotKey = GlobalHotKey(
+                keyCode: UInt32(kVK_ANSI_N),
+                modifiers: UInt32(controlKey | optionKey)
+            ) { [weak self] in
+                guard let self, let target = self.viewModel.firstPermissionRequest else { return }
+                self.viewModel.denyPermission(sessionId: target.sessionId, requestId: target.requestId)
+            }
+        } else {
+            allowHotKey?.unregister()
+            allowHotKey = nil
+            denyHotKey?.unregister()
+            denyHotKey = nil
         }
     }
 
     private func handleLocalKey(_ event: NSEvent) -> Bool {
-        // Option + D
-        if event.modifierFlags.contains(.option) && event.keyCode == 2 {
+        // Control + Option + D
+        if event.modifierFlags.contains([.control, .option]) && event.keyCode == 2 {
             panel.toggle()
             return true
         }

@@ -71,7 +71,7 @@ enum SessionStatus: String, Codable {
 
 // MARK: - 工具操作
 
-enum ToolAction: Codable {
+enum ToolAction: Codable, Equatable {
     case readFile(path: String)
     case writeFile(path: String)
     case editFile(path: String)
@@ -179,7 +179,7 @@ private enum serde_json_Value: Codable {
 
 // MARK: - 会话
 
-struct AgentSession: Codable, Identifiable {
+struct AgentSession: Codable, Identifiable, Equatable {
     let id: String
     let agent: AgentKind
     let terminalId: String
@@ -202,7 +202,8 @@ struct AgentSession: Codable, Identifiable {
 
     var elapsedTime: String {
         let now = UInt64(Date().timeIntervalSince1970)
-        let elapsed = now - startedAtSecs
+        // 时钟回拨时防止 UInt64 下溢
+        let elapsed = now >= startedAtSecs ? now - startedAtSecs : 0
         let minutes = elapsed / 60
         let seconds = elapsed % 60
         if minutes > 0 {
@@ -218,7 +219,7 @@ struct AgentSession: Codable, Identifiable {
 
 // MARK: - 待处理事件
 
-enum PendingEvent: Codable, Identifiable {
+enum PendingEvent: Codable, Identifiable, Equatable {
     case permissionRequest(
         sessionId: String, requestId: String, agent: AgentKind,
         toolName: String, description: String

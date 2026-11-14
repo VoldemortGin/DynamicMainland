@@ -6,22 +6,41 @@ import Combine
 @Observable
 final class AgentViewModel {
     var sessions: [AgentSession] = []
-    var pendingEvents: [PendingEvent] = []
+    var pendingEvents: [PendingEvent] = [] {
+        didSet {
+            if pendingEvents.count != oldValue.count {
+                onPendingCountChange?(pendingEvents.count)
+            }
+            if pendingEvents != oldValue {
+                onPendingEventsChange?(pendingEvents)
+            }
+        }
+    }
     var hooksInstalled: Bool = false
     var isRunning: Bool = false
+    /// 待处理事件数量变化回调（供菜单栏徽章使用）
+    var onPendingCountChange: ((Int) -> Void)?
+    /// 待处理事件列表变化回调（供全局热键按需注册/注销使用）
+    var onPendingEventsChange: (([PendingEvent]) -> Void)?
 
     private var pollTimer: Timer?
     private let bridge = RustBridge.shared
+    /// 本地已响应 / 已关闭的事件 id（Rust 侧移除有延迟，且 notification 的关闭只记录在本地）
+    private var handledEventIds: Set<String> = []
+    /// 已播放过音效的事件 id
+    private var seenEventIds: Set<String> = []
 
     func start() {
         bridge.start()
         isRunning = true
         hooksInstalled = bridge.hooksInstalled()
 
-        // 每 200ms 轮询一次状态
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+        // 每 200ms 轮询一次状态（.common 模式保证拖动面板/追踪菜单时不冻结）
+        let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
             self?.poll()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
     }
 
     func stop() {
@@ -36,19 +55,31 @@ final class AgentViewModel {
         hooksInstalled = bridge.hooksInstalled()
     }
 
+    /// ⌃⌥Y / ⌃⌥N 作用的目标：第一个待处理权限请求（跳过排在前面的通知 / 提问）
+    var firstPermissionRequest: (sessionId: String, requestId: String)? {
+        for case .permissionRequest(let sid, let rid, _, _, _) in pendingEvents {
+            return (sid, rid)
+        }
+        return nil
+    }
+
     func approvePermission(sessionId: String, requestId: String) {
         bridge.respondPermission(sessionId: sessionId, requestId: requestId, approved: true)
-        removePendingEvent(requestId: requestId)
+        markEventHandled(id: requestId)
     }
 
     func denyPermission(sessionId: String, requestId: String) {
         bridge.respondPermission(sessionId: sessionId, requestId: requestId, approved: false)
-        removePendingEvent(requestId: requestId)
+        markEventHandled(id: requestId)
     }
 
     func answerQuestion(sessionId: String, requestId: String, answer: String) {
         bridge.respondQuestion(sessionId: sessionId, requestId: requestId, answer: answer)
-        removePendingEvent(requestId: requestId)
+        markEventHandled(id: requestId)
+    }
+
+    func dismissNotification(id: String) {
+        markEventHandled(id: id)
     }
 
     func jumpToTerminal(sessionId: String) {
@@ -58,22 +89,31 @@ final class AgentViewModel {
     // MARK: - Private
 
     private func poll() {
-        sessions = bridge.getSessions()
-        let newEvents = bridge.getPendingEvents()
-        if !newEvents.isEmpty {
-            // 合并新事件，避免重复
-            let existingIds = Set(pendingEvents.map(\.id))
-            for event in newEvents {
-                if !existingIds.contains(event.id) {
-                    pendingEvents.append(event)
-                    // 播放通知音效
-                    SoundManager.shared.playNotification(for: event)
-                }
-            }
+        let newSessions = bridge.getSessions()
+        if newSessions != sessions {
+            sessions = newSessions
+        }
+
+        // 对账：以 Rust 快照为全集，用本地已处理集合过滤
+        let snapshot = bridge.getPendingEvents()
+        let snapshotIds = Set(snapshot.map(\.id))
+        handledEventIds.formIntersection(snapshotIds)
+
+        // 音效只在真正新出现的事件上播放一次
+        for event in snapshot where !seenEventIds.contains(event.id) {
+            SoundManager.shared.playNotification(for: event)
+        }
+        seenEventIds = snapshotIds
+
+        var visibleIds = Set<String>()
+        let visible = snapshot.filter { visibleIds.insert($0.id).inserted && !handledEventIds.contains($0.id) }
+        if visible != pendingEvents {
+            pendingEvents = visible
         }
     }
 
-    private func removePendingEvent(requestId: String) {
-        pendingEvents.removeAll { $0.id == requestId }
+    private func markEventHandled(id: String) {
+        handledEventIds.insert(id)
+        pendingEvents.removeAll { $0.id == id }
     }
 }

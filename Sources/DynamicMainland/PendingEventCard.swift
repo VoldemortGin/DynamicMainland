@@ -111,7 +111,7 @@ struct PendingEventCard: View {
                             .font(.system(size: 10, weight: .bold))
                         Text("Allow")
                             .font(DT.Font.footnote(.semibold))
-                        Text("⌘Y")
+                        Text("⌃⌥Y")
                             .font(DT.Font.caption())
                             .foregroundStyle(.white.opacity(0.5))
                     }
@@ -138,7 +138,7 @@ struct PendingEventCard: View {
                             .font(.system(size: 10, weight: .bold))
                         Text("Deny")
                             .font(DT.Font.footnote(.semibold))
-                        Text("⌘N")
+                        Text("⌃⌥N")
                             .font(DT.Font.caption())
                             .foregroundStyle(.white.opacity(0.5))
                     }
@@ -183,6 +183,7 @@ struct PendingEventCard: View {
                 .font(DT.Font.body())
                 .foregroundStyle(DT.Text.secondary)
                 .lineSpacing(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             if !options.isEmpty {
                 FlowLayout(spacing: DT.Space.sm) {
@@ -215,6 +216,9 @@ struct PendingEventCard: View {
                 HStack(spacing: DT.Space.sm) {
                     TextField("Type your answer...", text: $answerText)
                         .textFieldStyle(.plain)
+                        .onSubmit {
+                            submitAnswer(sessionId: sessionId, requestId: requestId)
+                        }
                         .font(DT.Font.footnote())
                         .foregroundStyle(DT.Text.primary)
                         .padding(.horizontal, 10)
@@ -226,11 +230,7 @@ struct PendingEventCard: View {
                         )
 
                     Button(action: {
-                        guard !answerText.isEmpty else { return }
-                        viewModel.answerQuestion(
-                            sessionId: sessionId, requestId: requestId, answer: answerText
-                        )
-                        answerText = ""
+                        submitAnswer(sessionId: sessionId, requestId: requestId)
                     }) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.system(size: 18))
@@ -261,7 +261,25 @@ struct PendingEventCard: View {
                     .lineLimit(2)
             }
             Spacer()
+
+            Button(action: { viewModel.dismissNotification(id: event.id) }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(DT.Text.quaternary)
+                    .frame(width: 18, height: 18)
+                    .background(Circle().fill(DT.Text.primary.opacity(0.06)))
+            }
+            .buttonStyle(ScaleButtonStyle())
+            .help("Dismiss")
         }
+    }
+
+    private func submitAnswer(sessionId: String, requestId: String) {
+        guard !answerText.isEmpty else { return }
+        viewModel.answerQuestion(
+            sessionId: sessionId, requestId: requestId, answer: answerText
+        )
+        answerText = ""
     }
 
     // MARK: - Helpers
