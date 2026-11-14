@@ -115,7 +115,7 @@ struct ContentView: View {
             Image(systemName: "keyboard")
                 .font(.system(size: 9))
                 .foregroundStyle(DT.Text.quaternary)
-            Text("⌃⌥D toggle · ⌃⌥Y allow · ⌃⌥N deny")
+            Text("⌃⇧D toggle · ⌃⇧Y allow · ⌃⇧N deny")
                 .font(DT.Font.caption())
                 .foregroundStyle(DT.Text.quaternary)
             Spacer()
@@ -256,23 +256,53 @@ struct ContentView: View {
 
 // MARK: - 脉冲圆点
 
-struct PulsingDot: View {
+/// 运行中状态点的"呼吸"效果：用 Core Animation 图层动画（opacity + scale）实现，
+/// 由渲染服务器合成，不会像 SwiftUI repeatForever 动画那样每帧驱动视图更新
+struct PulsingDot: NSViewRepresentable {
     let color: Color
     let size: CGFloat
 
-    @State private var isPulsing = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: size, height: size)
-            .shadow(color: color.opacity(isPulsing ? 0.7 : 0.3), radius: isPulsing ? 4 : 2)
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
-                    isPulsing = true
-                }
-            }
+    private static let animationKey = "pulse"
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.wantsLayer = true
+        // 用居中锚点的子图层做缩放，NSView 自带图层的锚点在左下角
+        let dot = CALayer()
+        dot.frame = CGRect(x: 0, y: 0, width: size, height: size)
+        dot.cornerRadius = size / 2
+        view.layer?.addSublayer(dot)
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        guard let dot = view.layer?.sublayers?.first else { return }
+        dot.backgroundColor = NSColor(color).cgColor
+
+        if reduceMotion {
+            dot.removeAnimation(forKey: Self.animationKey)
+        } else if dot.animation(forKey: Self.animationKey) == nil {
+            let opacity = CABasicAnimation(keyPath: "opacity")
+            opacity.fromValue = 0.4
+            opacity.toValue = 1
+            let scale = CABasicAnimation(keyPath: "transform.scale")
+            scale.fromValue = 0.85
+            scale.toValue = 1.15
+
+            let group = CAAnimationGroup()
+            group.animations = [opacity, scale]
+            group.duration = 2
+            group.autoreverses = true
+            group.repeatCount = .infinity
+            group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            group.isRemovedOnCompletion = false
+            dot.add(group, forKey: Self.animationKey)
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSView, context: Context) -> CGSize? {
+        CGSize(width: size, height: size)
     }
 }

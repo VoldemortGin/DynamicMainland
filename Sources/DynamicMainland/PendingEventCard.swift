@@ -111,7 +111,7 @@ struct PendingEventCard: View {
                             .font(.system(size: 10, weight: .bold))
                         Text("Allow")
                             .font(DT.Font.footnote(.semibold))
-                        Text("⌃⌥Y")
+                        Text("⌃⇧Y")
                             .font(DT.Font.caption())
                             .foregroundStyle(.white.opacity(0.5))
                     }
@@ -138,7 +138,7 @@ struct PendingEventCard: View {
                             .font(.system(size: 10, weight: .bold))
                         Text("Deny")
                             .font(DT.Font.footnote(.semibold))
-                        Text("⌃⌥N")
+                        Text("⌃⇧N")
                             .font(DT.Font.caption())
                             .foregroundStyle(.white.opacity(0.5))
                     }
@@ -280,6 +280,7 @@ struct PendingEventCard: View {
             sessionId: sessionId, requestId: requestId, answer: answerText
         )
         answerText = ""
+        (NSApp.keyWindow as? NotchPanel)?.relinquishKeyFocus()
     }
 
     // MARK: - Helpers

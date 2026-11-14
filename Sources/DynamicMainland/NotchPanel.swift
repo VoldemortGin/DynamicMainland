@@ -21,6 +21,8 @@ final class NotchPanel: NSPanel {
         self.level = .statusBar
         self.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         self.isReleasedWhenClosed = false
+        // 点击按钮不成为 key window，键盘焦点留在原先的 App；只有文本框等需要键盘输入的控件才让面板成为 key
+        self.becomesKeyOnlyIfNeeded = true
 
         // 圆角和边框
         self.contentView?.wantsLayer = true
@@ -67,6 +69,14 @@ final class NotchPanel: NSPanel {
         }
 
         setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
+    }
+
+    /// 文本输入结束后把键盘焦点还给前台 App：非激活面板没有可调用的"交还 key"接口，
+    /// 重新排一次窗口顺序会让窗口服务器把 key 交回前台 App 的窗口
+    func relinquishKeyFocus() {
+        guard isKeyWindow, isVisible else { return }
+        orderOut(nil)
+        orderFrontRegardless()
     }
 
     func toggle() {

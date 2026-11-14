@@ -158,7 +158,7 @@ impl SessionManager {
     pub fn cleanup_stale(&self, timeout_secs: u64) {
         let now = elapsed_secs();
         let mut sessions = self.sessions.lock().unwrap();
-        sessions.retain(|_, s| now - s.last_activity_secs < timeout_secs);
+        sessions.retain(|_, s| now.saturating_sub(s.last_activity_secs) < timeout_secs);
     }
 
     pub fn get_all_sessions_json(&self) -> String {
@@ -185,4 +185,44 @@ fn elapsed_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_session(id: &str, last_activity_secs: u64) -> Session {
+        Session {
+            id: id.to_string(),
+            agent: AgentKind::ClaudeCode,
+            terminal_id: "t1".to_string(),
+            terminal_app: "Terminal".to_string(),
+            working_dir: "/tmp".to_string(),
+            status: SessionStatus::Active,
+            current_action: None,
+            pending_permission: None,
+            pending_question: None,
+            pending_plan: None,
+            started_at_secs: last_activity_secs,
+            last_activity_secs,
+        }
+    }
+
+    #[test]
+    fn cleanup_keeps_session_with_future_timestamp_after_clock_rollback() {
+        // 时钟回拨：最后活动时间戳在未来，不应因 u64 下溢而被清理
+        let mgr = SessionManager::new();
+        mgr.upsert_session(make_session("s1", elapsed_secs() + 3600));
+        mgr.cleanup_stale(300);
+        assert_eq!(mgr.session_count(), 1);
+    }
+
+    #[test]
+    fn cleanup_removes_stale_session() {
+        // 超过超时时间无活动的会话应被清理
+        let mgr = SessionManager::new();
+        mgr.upsert_session(make_session("s1", elapsed_secs() - 1000));
+        mgr.cleanup_stale(300);
+        assert_eq!(mgr.session_count(), 0);
+    }
 }

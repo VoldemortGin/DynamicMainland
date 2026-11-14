@@ -55,7 +55,7 @@ final class AgentViewModel {
         hooksInstalled = bridge.hooksInstalled()
     }
 
-    /// ⌃⌥Y / ⌃⌥N 作用的目标：第一个待处理权限请求（跳过排在前面的通知 / 提问）
+    /// ⌃⇧Y / ⌃⇧N 作用的目标：第一个待处理权限请求（跳过排在前面的通知 / 提问）
     var firstPermissionRequest: (sessionId: String, requestId: String)? {
         for case .permissionRequest(let sid, let rid, _, _, _) in pendingEvents {
             return (sid, rid)
