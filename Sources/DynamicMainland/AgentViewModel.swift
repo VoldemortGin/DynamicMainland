@@ -77,6 +77,13 @@ final class AgentViewModel {
         markEventHandled(id: requestId)
     }
 
+    /// 对当前所有待处理权限请求逐条允许（不影响提问和通知）
+    func approveAllPermissions() {
+        for case .permissionRequest(let sid, let rid, _, _, _, _) in pendingEvents {
+            approvePermission(sessionId: sid, requestId: rid)
+        }
+    }
+
     func denyPermission(sessionId: String, requestId: String) {
         bridge.respondPermission(sessionId: sessionId, requestId: requestId, approved: false)
         markEventHandled(id: requestId)

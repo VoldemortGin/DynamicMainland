@@ -3,29 +3,50 @@ import SwiftUI
 /// 主内容视图 — 深色高级感设计，使用统一设计令牌
 struct ContentView: View {
     @Bindable var viewModel: AgentViewModel
+    /// 内容理想高度变化回调（面板据此调整窗口高度）
+    var onIdealHeightChange: ((CGFloat) -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
+    @State private var headerHeight: CGFloat = 0
+    @State private var contentHeight: CGFloat = 0
+    @State private var footerHeight: CGFloat = 0
+
     var body: some View {
         VStack(spacing: 0) {
-            headerBar
-            Divider().opacity(0.15)
+            VStack(spacing: 0) {
+                headerBar
+                Divider().opacity(0.15)
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
 
             if !viewModel.sessions.isEmpty || !viewModel.pendingEvents.isEmpty {
                 // 有会话或待处理事件时优先显示，即使 hooks 未安装（如手动接入的 agent）
                 sessionList
             } else if !viewModel.hooksInstalled || viewModel.installFeedback != nil {
                 // 安装结果提示期间保留安装页，让结果显示在按钮下方
-                setupPrompt
+                measuredState(setupPrompt)
             } else {
-                emptyState
+                measuredState(emptyState)
             }
 
             footerBar
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(panelBackground)
         .preferredColorScheme(.dark)
+        .onChange(of: headerHeight + contentHeight + footerHeight, initial: true) { _, height in
+            onIdealHeightChange?(height)
+        }
+    }
+
+    /// 空状态 / 安装页按自身理想高度测量，再在剩余空间里居中
+    private func measuredState(_ state: some View) -> some View {
+        state
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+            .frame(maxHeight: .infinity)
     }
 
     // MARK: - Panel Background
@@ -130,7 +151,12 @@ struct ContentView: View {
 
     private var sessionList: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(spacing: DT.Space.md) {
+            // 用 VStack 而非 LazyVStack：Lazy 栈对未渲染行按视口估算高度，测量值会随窗口高度变化形成反馈
+            VStack(spacing: DT.Space.md) {
+                if permissionRequestCount >= 2 {
+                    allowAllButton(count: permissionRequestCount)
+                }
+
                 // 待处理事件（优先）
                 ForEach(viewModel.pendingEvents) { event in
                     PendingEventCard(
@@ -166,9 +192,45 @@ struct ContentView: View {
             }
             .padding(.horizontal, DT.Space.lg)
             .padding(.vertical, DT.Space.md)
+            // 测量滚动内容本身的高度（而非 ScrollView），作为面板理想高度的一部分
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
         }
         .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.15), value: viewModel.sessions.count)
         .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.15), value: viewModel.pendingEvents.count)
+    }
+
+    private var permissionRequestCount: Int {
+        viewModel.pendingEvents.filter {
+            if case .permissionRequest = $0 { return true }
+            return false
+        }.count
+    }
+
+    /// 次要样式的「全部允许」：逐条走单条允许路径
+    private func allowAllButton(count: Int) -> some View {
+        HStack {
+            Spacer()
+            Button(action: {
+                SoundManager.shared.playApproved()
+                viewModel.approveAllPermissions()
+            }) {
+                HStack(spacing: DT.Space.xs) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.system(size: 10, weight: .bold))
+                    Text("Allow all (\(count))")
+                        .font(DT.Font.footnote(.semibold))
+                }
+                .foregroundStyle(DT.Status.success)
+                .padding(.horizontal, DT.Space.lg)
+                .padding(.vertical, 5)
+                .background(DT.Surface.overlay, in: RoundedRectangle(cornerRadius: DT.Radius.sm))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DT.Radius.sm)
+                        .stroke(DT.Status.success.opacity(0.3), lineWidth: 1)
+                )
+            }
+            .buttonStyle(ScaleButtonStyle())
+        }
     }
 
     // MARK: - Empty State

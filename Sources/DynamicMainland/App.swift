@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var togglePanelHotKey: GlobalHotKey?
     private var allowHotKey: GlobalHotKey?
     private var denyHotKey: GlobalHotKey?
+    /// 已出现过的权限请求 / 提问 id：只有首次出现的才会自动弹出面板
+    private var seenInteractiveEventIds: Set<String> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusBar()
@@ -36,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 仅当存在待处理权限请求时注册 ⌃⇧Y / ⌃⇧N，平时不占用组合键
         viewModel.onPendingEventsChange = { [weak self] events in
             self?.updatePermissionHotKeys(for: events)
+            self?.updateAutoPresentation(for: events)
         }
 
         viewModel.start()
@@ -107,11 +110,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 面板
 
     private func setupPanel() {
-        let contentView = ContentView(viewModel: viewModel)
+        let contentView = ContentView(viewModel: viewModel) { [weak self] height in
+            self?.panel?.updateIdealHeight(height)
+        }
         let hostingView = NSHostingView(rootView: contentView)
         // 面板是 .titled + fullSizeContentView，不让标题栏安全区把内容往下推出一条透明带
         hostingView.safeAreaRegions = []
+        // 窗口尺寸由 NotchPanel 根据上报的理想高度决定，不让 SwiftUI 再给窗口加尺寸约束
+        hostingView.sizingOptions = []
         panel = NotchPanel(contentView: hostingView)
+    }
+
+    /// 新的权限请求 / 提问到来且面板隐藏时自动弹出；自动弹出的面板在交互事件全部了结后自动收起
+    private func updateAutoPresentation(for events: [PendingEvent]) {
+        let interactiveIds = Set(events.filter(\.isInteractive).map(\.id))
+        let hasNew = !interactiveIds.isSubset(of: seenInteractiveEventIds)
+        seenInteractiveEventIds = interactiveIds
+
+        if hasNew && !panel.isPresented {
+            panel.show(auto: true)
+        } else if interactiveIds.isEmpty && panel.isAutoPresented {
+            panel.hide()
+        }
     }
 
     // MARK: - 键盘快捷键
@@ -135,7 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
             guard let self, self.panel.isVisible else { return }
             if !self.panel.frame.contains(NSEvent.mouseLocation) {
-                self.panel.toggle()
+                self.panel.hide()
             }
         }
     }
