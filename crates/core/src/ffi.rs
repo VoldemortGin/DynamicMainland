@@ -104,17 +104,22 @@ pub extern "C" fn dm_respond_question(
     engine.server.respond_question(&request_id, &answer);
 }
 
+/// 安装 hooks：成功返回 NULL，失败返回原因字符串（调用方需用 dm_free_string 释放）
 #[no_mangle]
-pub extern "C" fn dm_install_hooks() {
+pub extern "C" fn dm_install_hooks() -> *mut c_char {
     let engine = get_engine();
     let hook_path = get_hook_client_path();
     let socket_path = engine.server.socket_path().to_string();
     let results = hooks::install_all_hooks(&hook_path, &socket_path);
-    for (agent, result) in results {
+    for (agent, result) in &results {
         match result {
             Ok(()) => eprintln!("[DM] {} hook 安装成功", agent.display_name()),
             Err(e) => eprintln!("[DM] {} hook 安装失败: {}", agent.display_name(), e),
         }
+    }
+    match hooks::overall_install_result(&results) {
+        Ok(()) => std::ptr::null_mut(),
+        Err(e) => string_to_c(e),
     }
 }
 

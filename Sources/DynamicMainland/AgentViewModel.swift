@@ -17,6 +17,8 @@ final class AgentViewModel {
         }
     }
     var hooksInstalled: Bool = false
+    /// 最近一次安装 hooks 的结果，几秒后自动清除
+    var installFeedback: InstallFeedback?
     var isRunning: Bool = false
     /// 待处理事件数量变化回调（供菜单栏徽章使用）
     var onPendingCountChange: ((Int) -> Void)?
@@ -29,6 +31,7 @@ final class AgentViewModel {
     private var handledEventIds: Set<String> = []
     /// 已播放过音效的事件 id
     private var seenEventIds: Set<String> = []
+    private var installFeedbackClear: DispatchWorkItem?
 
     func start() {
         bridge.start()
@@ -51,8 +54,14 @@ final class AgentViewModel {
     }
 
     func installHooks() {
-        bridge.installHooks()
+        let error = bridge.installHooks()
         hooksInstalled = bridge.hooksInstalled()
+        installFeedback = InstallFeedback(error: error)
+
+        installFeedbackClear?.cancel()
+        let clear = DispatchWorkItem { [weak self] in self?.installFeedback = nil }
+        installFeedbackClear = clear
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: clear)
     }
 
     /// ⌃⇧Y / ⌃⇧N 作用的目标：第一个待处理权限请求（跳过排在前面的通知 / 提问）
@@ -115,5 +124,15 @@ final class AgentViewModel {
     private func markEventHandled(id: String) {
         handledEventIds.insert(id)
         pendingEvents.removeAll { $0.id == id }
+    }
+}
+
+/// 安装 hooks 的结果反馈
+struct InstallFeedback: Equatable {
+    /// 失败原因；nil 表示成功
+    let error: String?
+
+    var message: String {
+        error.map { "Install failed: \($0)" } ?? "Hooks installed for Claude Code"
     }
 }

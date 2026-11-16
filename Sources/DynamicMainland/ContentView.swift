@@ -14,7 +14,8 @@ struct ContentView: View {
             if !viewModel.sessions.isEmpty || !viewModel.pendingEvents.isEmpty {
                 // 有会话或待处理事件时优先显示，即使 hooks 未安装（如手动接入的 agent）
                 sessionList
-            } else if !viewModel.hooksInstalled {
+            } else if !viewModel.hooksInstalled || viewModel.installFeedback != nil {
+                // 安装结果提示期间保留安装页，让结果显示在按钮下方
                 setupPrompt
             } else {
                 emptyState
@@ -194,7 +195,7 @@ struct ContentView: View {
                     .font(DT.Font.headline(.medium))
                     .foregroundStyle(DT.Text.tertiary)
 
-                Text("Run claude, codex, or cursor in terminal")
+                Text("Run Claude Code (claude) in a terminal")
                     .font(DT.Font.body())
                     .foregroundStyle(DT.Text.quaternary)
                     .multilineTextAlignment(.center)
@@ -248,9 +249,26 @@ struct ContentView: View {
             }
             .buttonStyle(ScaleButtonStyle())
 
+            if let feedback = viewModel.installFeedback {
+                installFeedbackView(feedback)
+            }
+
             Spacer()
         }
         .padding()
+    }
+
+    private func installFeedbackView(_ feedback: InstallFeedback) -> some View {
+        let succeeded = feedback.error == nil
+        return HStack(alignment: .top, spacing: DT.Space.xs) {
+            Image(systemName: succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+            Text(feedback.message)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+        }
+        .font(DT.Font.footnote())
+        .foregroundStyle(succeeded ? DT.Status.success : DT.Status.danger)
+        .padding(.horizontal, DT.Space.lg)
     }
 }
 

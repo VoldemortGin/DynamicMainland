@@ -25,8 +25,9 @@ void dm_respond_permission(const char* session_id, const char* request_id, bool 
 /// 响应用户问题
 void dm_respond_question(const char* session_id, const char* request_id, const char* answer);
 
-/// 为所有检测到的 Agent 安装 hook
-void dm_install_hooks(void);
+/// 为所有检测到的 Agent 安装 hook（目前仅 Claude Code 支持自动安装）
+/// 成功返回 NULL；失败返回原因字符串，调用方需用 dm_free_string 释放
+char* dm_install_hooks(void);
 
 /// 检查 hook 是否已安装
 bool dm_hooks_installed(void);

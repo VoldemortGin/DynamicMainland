@@ -55,9 +55,11 @@ final class RustBridge {
         }
     }
 
-    /// 安装 hooks
-    func installHooks() {
-        dm_install_hooks()
+    /// 安装 hooks：成功返回 nil，失败返回原因
+    func installHooks() -> String? {
+        guard let ptr = dm_install_hooks() else { return nil }
+        defer { dm_free_string(ptr) }
+        return String(cString: ptr)
     }
 
     /// 检查 hooks 是否已安装

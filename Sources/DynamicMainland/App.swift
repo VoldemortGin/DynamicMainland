@@ -84,6 +84,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func installHooksAction() {
         viewModel.installHooks()
+        guard let feedback = viewModel.installFeedback else { return }
+
+        // 面板可能隐藏或不在安装页，用弹窗确保菜单触发的安装结果可见；关闭后把焦点还给原先的前台 App
+        let previousApp = NSWorkspace.shared.frontmostApplication
+        let alert = NSAlert()
+        alert.alertStyle = feedback.error == nil ? .informational : .warning
+        alert.messageText = feedback.message
+        // 面板在 .statusBar 层级会盖住弹窗，弹窗期间临时降到弹窗之下
+        let panelLevel = panel.level
+        panel.level = .floating
+        NSApp.activate()
+        alert.runModal()
+        panel.level = panelLevel
+        previousApp?.activate()
     }
 
     @objc private func quitApp() {
