@@ -3,7 +3,7 @@ use crate::session::*;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
 
@@ -111,14 +111,55 @@ impl PendingEvent {
     }
 }
 
-/// 待处理事件及其入队时间（内部记录，不参与序列化）
+/// 待处理事件及其入队时间、唯一 id（内部记录）
 struct PendingEntry {
+    /// 权限请求 / 问题沿用 request_id；notification 由 Rust 侧生成唯一 id
+    id: String,
+    /// UNIX 时间（秒），与 Swift 侧 `Date().timeIntervalSince1970` 可直接比较
     created_at_secs: u64,
     event: PendingEvent,
 }
 
+impl PendingEntry {
+    fn new(created_at_secs: u64, event: PendingEvent) -> Self {
+        let id = match event.request_id() {
+            Some(rid) => rid.to_string(),
+            None => format!("notif-{}", NEXT_NOTIFICATION_ID.fetch_add(1, Ordering::Relaxed)),
+        };
+        Self {
+            id,
+            created_at_secs,
+            event,
+        }
+    }
+
+    /// 权限请求 / 问题的默认拒绝（超时）时刻；notification 没有超时
+    fn expires_at_secs(&self) -> Option<u64> {
+        self.event
+            .request_id()
+            .map(|_| self.created_at_secs + REQUEST_TIMEOUT_SECS)
+    }
+}
+
+/// 待处理事件快照（传给 UI 的 JSON）：事件字段 + id / 时间信息
+#[derive(Serialize)]
+struct PendingEventSnapshot<'a> {
+    id: &'a str,
+    created_at_secs: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expires_at_secs: Option<u64>,
+    #[serde(flatten)]
+    event: &'a PendingEvent,
+}
+
 /// notification 类事件的最长存活时间（无 waiter，靠 TTL 和会话清理了结）
 const NOTIFICATION_TTL_SECS: u64 = 300;
+
+/// 权限请求 / 问题等待 UI 响应的最长时间，超时后默认拒绝并移除
+const REQUEST_TIMEOUT_SECS: u64 = 120;
+
+/// notification 唯一 id 的自增计数器
+static NEXT_NOTIFICATION_ID: AtomicU64 = AtomicU64::new(1);
 
 pub struct Server {
     session_mgr: SessionManager,
@@ -158,7 +199,15 @@ impl Server {
 
     pub fn get_pending_events_json(&self) -> String {
         let events = self.pending_events.lock().unwrap();
-        let list: Vec<&PendingEvent> = events.iter().map(|e| &e.event).collect();
+        let list: Vec<PendingEventSnapshot> = events
+            .iter()
+            .map(|e| PendingEventSnapshot {
+                id: &e.id,
+                created_at_secs: e.created_at_secs,
+                expires_at_secs: e.expires_at_secs(),
+                event: &e.event,
+            })
+            .collect();
         serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string())
     }
 
@@ -401,21 +450,21 @@ fn process_event(
                 .insert(request_id.clone(), tx);
 
             // 推送待处理事件给 UI
-            pending_events.lock().unwrap().push(PendingEntry {
-                created_at_secs: now_secs(),
-                event: PendingEvent::PermissionRequest {
+            pending_events.lock().unwrap().push(PendingEntry::new(
+                now_secs(),
+                PendingEvent::PermissionRequest {
                     session_id: session_id.clone(),
                     request_id: request_id.clone(),
                     agent,
                     tool_name,
                     description,
                 },
-            });
+            ));
 
             session_mgr.update_status(&session_id, SessionStatus::WaitingPermission);
 
-            // 等待 UI 响应（最多 120 秒）
-            match rx.recv_timeout(std::time::Duration::from_secs(120)) {
+            // 等待 UI 响应（最多 REQUEST_TIMEOUT_SECS 秒）
+            match rx.recv_timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS)) {
                 Ok(approved) => {
                     session_mgr.clear_pending(&session_id);
                     HookResponse::Permission { approved }
@@ -458,20 +507,20 @@ fn process_event(
                 .unwrap()
                 .insert(request_id.clone(), tx);
 
-            pending_events.lock().unwrap().push(PendingEntry {
-                created_at_secs: now_secs(),
-                event: PendingEvent::Question {
+            pending_events.lock().unwrap().push(PendingEntry::new(
+                now_secs(),
+                PendingEvent::Question {
                     session_id: session_id.clone(),
                     request_id: request_id.clone(),
                     agent,
                     question,
                     options,
                 },
-            });
+            ));
 
             session_mgr.update_status(&session_id, SessionStatus::WaitingAnswer);
 
-            match rx.recv_timeout(std::time::Duration::from_secs(120)) {
+            match rx.recv_timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS)) {
                 Ok(text) => {
                     session_mgr.clear_pending(&session_id);
                     HookResponse::Answer { text }
@@ -497,15 +546,15 @@ fn process_event(
                 .map(|s| s.agent)
                 .unwrap_or(AgentKind::ClaudeCode);
 
-            pending_events.lock().unwrap().push(PendingEntry {
-                created_at_secs: now_secs(),
-                event: PendingEvent::Notification {
+            pending_events.lock().unwrap().push(PendingEntry::new(
+                now_secs(),
+                PendingEvent::Notification {
                     session_id,
                     agent,
                     level,
                     message,
                 },
-            });
+            ));
             HookResponse::Ack
         }
 
@@ -646,10 +695,11 @@ mod tests {
     }
 
     fn push_entry(server: &Server, created_at_secs: u64, event: PendingEvent) {
-        server.pending_events.lock().unwrap().push(PendingEntry {
-            created_at_secs,
-            event,
-        });
+        server
+            .pending_events
+            .lock()
+            .unwrap()
+            .push(PendingEntry::new(created_at_secs, event));
     }
 
     fn pending_count(server: &Server) -> usize {
@@ -826,5 +876,105 @@ mod tests {
             &events[0].event,
             PendingEvent::Notification { message, .. } if message == "keep"
         ));
+    }
+
+    fn snapshot(server: &Server) -> Vec<serde_json::Value> {
+        serde_json::from_str(&server.get_pending_events_json()).unwrap()
+    }
+
+    #[test]
+    fn identical_notifications_get_distinct_ids() {
+        let mgr = SessionManager::new();
+        let server = Server::new(mgr.clone());
+        mgr.upsert_session(make_session("s1"));
+        let no_waiters = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let no_q_waiters = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        for _ in 0..2 {
+            process_event(
+                HookEvent::Notification {
+                    session_id: "s1".to_string(),
+                    level: "info".to_string(),
+                    message: "same text".to_string(),
+                },
+                &mgr,
+                &server.pending_events,
+                &no_waiters,
+                &no_q_waiters,
+            );
+        }
+
+        let events = snapshot(&server);
+        assert_eq!(events.len(), 2);
+        let id0 = events[0]["id"].as_str().unwrap();
+        let id1 = events[1]["id"].as_str().unwrap();
+        assert_ne!(id0, id1, "相同文案的两条通知应有不同 id");
+        for e in &events {
+            assert_eq!(e["type"], "notification");
+            assert_eq!(e["message"], "same text");
+            assert!(e.get("expires_at_secs").is_none(), "notification 不应有超时");
+        }
+    }
+
+    #[test]
+    fn snapshot_includes_request_id_and_deadline() {
+        let server = Server::new(SessionManager::new());
+        let created = 1_700_000_000;
+        push_entry(
+            &server,
+            created,
+            PendingEvent::PermissionRequest {
+                session_id: "s1".to_string(),
+                request_id: "r1".to_string(),
+                agent: AgentKind::ClaudeCode,
+                tool_name: "Bash".to_string(),
+                description: "ls".to_string(),
+            },
+        );
+        push_entry(
+            &server,
+            created,
+            PendingEvent::Question {
+                session_id: "s1".to_string(),
+                request_id: "q1".to_string(),
+                agent: AgentKind::ClaudeCode,
+                question: "?".to_string(),
+                options: vec![],
+            },
+        );
+
+        let events = snapshot(&server);
+        assert_eq!(events[0]["type"], "permission_request");
+        assert_eq!(events[0]["id"], "r1");
+        assert_eq!(events[0]["request_id"], "r1");
+        assert_eq!(events[1]["type"], "question");
+        assert_eq!(events[1]["id"], "q1");
+        for e in &events {
+            assert_eq!(e["created_at_secs"], created);
+            assert_eq!(e["expires_at_secs"], created + REQUEST_TIMEOUT_SECS);
+        }
+    }
+
+    #[test]
+    fn new_entry_uses_unix_wall_clock() {
+        // Swift 侧用 Date().timeIntervalSince1970 计算剩余时间，Rust 必须用 UNIX 时间而非 Instant
+        let unix_now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let entry = PendingEntry::new(
+            now_secs(),
+            PendingEvent::PermissionRequest {
+                session_id: "s1".to_string(),
+                request_id: "r1".to_string(),
+                agent: AgentKind::ClaudeCode,
+                tool_name: "Bash".to_string(),
+                description: "ls".to_string(),
+            },
+        );
+        assert!(entry.created_at_secs.abs_diff(unix_now) <= 1);
+        assert_eq!(
+            entry.expires_at_secs(),
+            Some(entry.created_at_secs + REQUEST_TIMEOUT_SECS)
+        );
     }
 }

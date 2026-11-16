@@ -220,33 +220,43 @@ struct AgentSession: Codable, Identifiable, Equatable {
 // MARK: - 待处理事件
 
 enum PendingEvent: Codable, Identifiable, Equatable {
+    /// expiresAtSecs: Rust 侧默认拒绝 / 超时的 UNIX 时间（秒），旧版快照没有该字段
     case permissionRequest(
         sessionId: String, requestId: String, agent: AgentKind,
-        toolName: String, description: String
+        toolName: String, description: String, expiresAtSecs: UInt64?
     )
     case question(
         sessionId: String, requestId: String, agent: AgentKind,
-        question: String, options: [String]
+        question: String, options: [String], expiresAtSecs: UInt64?
     )
+    /// eventId: Rust 侧生成的唯一 id，旧版快照没有该字段
     case notification(
-        sessionId: String, agent: AgentKind, level: String, message: String
+        sessionId: String, agent: AgentKind, level: String, message: String, eventId: String?
     )
 
     var id: String {
         switch self {
-        case .permissionRequest(_, let rid, _, _, _): rid
-        case .question(_, let rid, _, _, _): rid
-        case .notification(let sid, _, _, let msg): "\(sid)-\(msg.hashValue)"
+        case .permissionRequest(_, let rid, _, _, _, _): rid
+        case .question(_, let rid, _, _, _, _): rid
+        case .notification(let sid, _, _, let msg, let eventId): eventId ?? "\(sid)-\(msg.hashValue)"
         }
+    }
+
+    /// 是否为需要用户响应的交互事件（权限请求 / 提问）
+    var isInteractive: Bool {
+        if case .notification = self { return false }
+        return true
     }
 
     enum CodingKeys: String, CodingKey {
         case type_ = "type"
+        case id
         case sessionId = "session_id"
         case requestId = "request_id"
         case agent, toolName = "tool_name", description
         case question, options
         case level, message
+        case expiresAtSecs = "expires_at_secs"
     }
 
     init(from decoder: Decoder) throws {
@@ -260,7 +270,8 @@ enum PendingEvent: Codable, Identifiable, Equatable {
                 requestId: try container.decode(String.self, forKey: .requestId),
                 agent: try container.decode(AgentKind.self, forKey: .agent),
                 toolName: try container.decode(String.self, forKey: .toolName),
-                description: try container.decode(String.self, forKey: .description)
+                description: try container.decode(String.self, forKey: .description),
+                expiresAtSecs: try container.decodeIfPresent(UInt64.self, forKey: .expiresAtSecs)
             )
         case "question":
             self = .question(
@@ -268,14 +279,16 @@ enum PendingEvent: Codable, Identifiable, Equatable {
                 requestId: try container.decode(String.self, forKey: .requestId),
                 agent: try container.decode(AgentKind.self, forKey: .agent),
                 question: try container.decode(String.self, forKey: .question),
-                options: try container.decodeIfPresent([String].self, forKey: .options) ?? []
+                options: try container.decodeIfPresent([String].self, forKey: .options) ?? [],
+                expiresAtSecs: try container.decodeIfPresent(UInt64.self, forKey: .expiresAtSecs)
             )
         case "notification":
             self = .notification(
                 sessionId: try container.decode(String.self, forKey: .sessionId),
                 agent: try container.decode(AgentKind.self, forKey: .agent),
                 level: try container.decode(String.self, forKey: .level),
-                message: try container.decode(String.self, forKey: .message)
+                message: try container.decode(String.self, forKey: .message),
+                eventId: try container.decodeIfPresent(String.self, forKey: .id)
             )
         default:
             throw DecodingError.dataCorruptedError(

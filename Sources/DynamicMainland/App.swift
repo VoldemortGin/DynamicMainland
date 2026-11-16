@@ -181,7 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ⌘Y: 批准当前权限请求
         if event.modifierFlags.contains(.command) && event.keyCode == 16 {
             if let first = viewModel.pendingEvents.first,
-               case .permissionRequest(let sid, let rid, _, _, _) = first {
+               case .permissionRequest(let sid, let rid, _, _, _, _) = first {
                 viewModel.approvePermission(sessionId: sid, requestId: rid)
                 return true
             }
@@ -190,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ⌘N: 拒绝当前权限请求
         if event.modifierFlags.contains(.command) && event.keyCode == 45 {
             if let first = viewModel.pendingEvents.first,
-               case .permissionRequest(let sid, let rid, _, _, _) = first {
+               case .permissionRequest(let sid, let rid, _, _, _, _) = first {
                 viewModel.denyPermission(sessionId: sid, requestId: rid)
                 return true
             }
@@ -201,7 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            let char = event.characters, let digit = char.first?.wholeNumberValue,
            digit >= 1 && digit <= 9 {
             if let first = viewModel.pendingEvents.first,
-               case .question(let sid, let rid, _, _, let options) = first,
+               case .question(let sid, let rid, _, _, let options, _) = first,
                digit <= options.count {
                 viewModel.answerQuestion(
                     sessionId: sid, requestId: rid, answer: options[digit - 1]

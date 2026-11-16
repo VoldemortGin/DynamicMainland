@@ -15,7 +15,7 @@ final class SoundManager {
             playSystemSound(.basso)
         case .question:
             playSystemSound(.purr)
-        case .notification(_, _, let level, _):
+        case .notification(_, _, let level, _, _):
             switch level {
             case "success": playSystemSound(.glass)
             case "error": playSystemSound(.sosumi)

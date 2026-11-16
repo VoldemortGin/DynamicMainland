@@ -13,19 +13,21 @@ struct PendingEventCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DT.Space.md) {
             switch event {
-            case .permissionRequest(let sessionId, let requestId, let agent, let toolName, let description):
+            case .permissionRequest(let sessionId, let requestId, let agent, let toolName, let description, let expiresAtSecs):
                 permissionView(
                     sessionId: sessionId, requestId: requestId,
-                    agent: agent, toolName: toolName, description: description
+                    agent: agent, toolName: toolName, description: description,
+                    expiresAtSecs: expiresAtSecs
                 )
 
-            case .question(let sessionId, let requestId, let agent, let question, let options):
+            case .question(let sessionId, let requestId, let agent, let question, let options, let expiresAtSecs):
                 questionView(
                     sessionId: sessionId, requestId: requestId,
-                    agent: agent, question: question, options: options
+                    agent: agent, question: question, options: options,
+                    expiresAtSecs: expiresAtSecs
                 )
 
-            case .notification(_, let agent, let level, let message):
+            case .notification(_, let agent, let level, let message, _):
                 notificationView(agent: agent, level: level, message: message)
             }
         }
@@ -58,7 +60,7 @@ struct PendingEventCard: View {
 
     private func permissionView(
         sessionId: String, requestId: String,
-        agent: AgentKind, toolName: String, description: String
+        agent: AgentKind, toolName: String, description: String, expiresAtSecs: UInt64?
     ) -> some View {
         VStack(alignment: .leading, spacing: DT.Space.md) {
             // 头部（合并工具名称到标题行）
@@ -88,6 +90,10 @@ struct PendingEventCard: View {
                     )
 
                 Spacer()
+
+                if let expiresAtSecs {
+                    TimeoutCountdown(expiresAtSecs: expiresAtSecs)
+                }
             }
 
             // 描述
@@ -161,7 +167,7 @@ struct PendingEventCard: View {
 
     private func questionView(
         sessionId: String, requestId: String,
-        agent: AgentKind, question: String, options: [String]
+        agent: AgentKind, question: String, options: [String], expiresAtSecs: UInt64?
     ) -> some View {
         VStack(alignment: .leading, spacing: DT.Space.md) {
             HStack(spacing: DT.Space.sm) {
@@ -177,6 +183,12 @@ struct PendingEventCard: View {
                 Text("asks")
                     .font(DT.Font.footnote())
                     .foregroundStyle(DT.Text.tertiary)
+
+                Spacer()
+
+                if let expiresAtSecs {
+                    TimeoutCountdown(expiresAtSecs: expiresAtSecs)
+                }
             }
 
             Text(question)
@@ -289,7 +301,7 @@ struct PendingEventCard: View {
         switch event {
         case .permissionRequest: DT.Surface.warmCard
         case .question: DT.Surface.coolCard
-        case .notification(_, _, let level, _):
+        case .notification(_, _, let level, _, _):
             switch level {
             case "error": DT.Surface.dangerCard
             case "warning": DT.Surface.warningCard
@@ -300,7 +312,7 @@ struct PendingEventCard: View {
 
     private var borderColor: Color {
         switch event {
-        case .permissionRequest(_, _, let agent, _, _):
+        case .permissionRequest(_, _, let agent, _, _, _):
             Color(hex: agent.accentColor)
         case .question:
             DT.Status.info
@@ -324,6 +336,24 @@ struct PendingEventCard: View {
         case "error": DT.Status.danger
         case "warning": DT.Status.warning
         default: DT.Status.info
+        }
+    }
+}
+
+// MARK: - 超时倒计时
+
+/// 距 Rust 侧默认拒绝 / 超时还剩的秒数；TimelineView 每秒只重绘这个小标签
+struct TimeoutCountdown: View {
+    let expiresAtSecs: UInt64
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let remaining = max(0, Int((Double(expiresAtSecs) - context.date.timeIntervalSince1970).rounded(.up)))
+            Text("\(remaining)s")
+                .font(DT.Font.footnote())
+                .monospacedDigit()
+                .foregroundStyle(remaining <= 30 ? DT.Status.warning : DT.Text.quaternary)
+                .accessibilityLabel("\(remaining) seconds until timeout")
         }
     }
 }
