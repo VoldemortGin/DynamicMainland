@@ -676,6 +676,16 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
+    /// Swift 侧 ToolAction 解码依赖该 JSON 形状（外部标签 + 嵌套字段）
+    #[test]
+    fn tool_action_serializes_externally_tagged() {
+        let action = parse_tool_action("Bash", &serde_json::json!({"command": "ls"}));
+        assert_eq!(
+            serde_json::to_value(&action).unwrap(),
+            serde_json::json!({"execute_bash": {"command": "ls"}})
+        );
+    }
+
     fn make_session(id: &str) -> Session {
         let now = now_secs();
         Session {

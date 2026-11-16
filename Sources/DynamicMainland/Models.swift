@@ -116,64 +116,36 @@ enum ToolAction: Codable, Equatable {
         case path, command, url, query, toolName = "tool_name", summary
     }
 
+    // Rust 侧 serde 外部标签格式：{"execute_bash": {"command": "ls"}}
     init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        let dict = try container.decode([String: serde_json_Value].self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
 
-        if let path = dict["path"]?.stringValue {
-            if dict["read_file"] != nil { self = .readFile(path: path); return }
-            if dict["write_file"] != nil { self = .writeFile(path: path); return }
-            if dict["edit_file"] != nil { self = .editFile(path: path); return }
-        }
-        if let cmd = dict["command"]?.stringValue {
-            self = .executeBash(command: cmd); return
-        }
-        if let url = dict["url"]?.stringValue {
-            self = .webFetch(url: url); return
-        }
-        if let q = dict["query"]?.stringValue {
-            self = .search(query: q); return
+        func field(_ tag: CodingKeys, _ key: CodingKeys) throws -> String? {
+            guard container.contains(tag) else { return nil }
+            return try container.nestedContainer(keyedBy: CodingKeys.self, forKey: tag)
+                .decode(String.self, forKey: key)
         }
 
-        self = .other(
-            toolName: dict["tool_name"]?.stringValue ?? "unknown",
-            summary: dict["summary"]?.stringValue ?? ""
-        )
+        if let v = try field(.readFile, .path) { self = .readFile(path: v); return }
+        if let v = try field(.writeFile, .path) { self = .writeFile(path: v); return }
+        if let v = try field(.editFile, .path) { self = .editFile(path: v); return }
+        if let v = try field(.executeBash, .command) { self = .executeBash(command: v); return }
+        if let v = try field(.webFetch, .url) { self = .webFetch(url: v); return }
+        if let v = try field(.search, .query) { self = .search(query: v); return }
+        if container.contains(.other) {
+            let other = try container.nestedContainer(keyedBy: CodingKeys.self, forKey: .other)
+            self = .other(
+                toolName: try other.decode(String.self, forKey: .toolName),
+                summary: try other.decode(String.self, forKey: .summary)
+            )
+            return
+        }
+        // 未识别的变体不抛错，避免整份快照解码失败
+        self = .other(toolName: "unknown", summary: "")
     }
 
     func encode(to encoder: Encoder) throws {
         // 编码不需要，仅用于解码
-    }
-}
-
-// 简单的 JSON 值包装
-private enum serde_json_Value: Codable {
-    case string(String)
-    case number(Double)
-    case bool(Bool)
-    case null
-
-    var stringValue: String? {
-        if case .string(let s) = self { return s }
-        return nil
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let s = try? container.decode(String.self) { self = .string(s); return }
-        if let n = try? container.decode(Double.self) { self = .number(n); return }
-        if let b = try? container.decode(Bool.self) { self = .bool(b); return }
-        self = .null
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        switch self {
-        case .string(let s): try container.encode(s)
-        case .number(let n): try container.encode(n)
-        case .bool(let b): try container.encode(b)
-        case .null: try container.encodeNil()
-        }
     }
 }
 
