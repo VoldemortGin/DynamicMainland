@@ -48,6 +48,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel.stop()
     }
 
+    /// 已在运行时再次打开 App（Finder / Spotlight / open）：菜单栏图标可能被刘海挡住，以手动方式显示面板作为兜底入口
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        panel.show(auto: false)
+        return false
+    }
+
     // MARK: - 菜单栏
 
     private func setupStatusBar() {

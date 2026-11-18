@@ -129,9 +129,13 @@ final class NotchPanel: NSPanel {
         }
     }
 
-    /// 显示面板（不抢键盘焦点）；auto 表示由新到的交互事件自动弹出
+    /// 显示面板（不抢键盘焦点）；auto 表示由新到的交互事件自动弹出。
+    /// 已显示时再手动打开，转为手动状态，不再被自动收起
     func show(auto: Bool) {
-        guard !isPresented else { return }
+        guard !isPresented else {
+            if !auto { isAutoPresented = false }
+            return
+        }
         isPresented = true
         isAutoPresented = auto
         if !isVisible {
