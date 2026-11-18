@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var denyHotKey: GlobalHotKey?
     /// 已出现过的权限请求 / 提问 id：只有首次出现的才会自动弹出面板
     private var seenInteractiveEventIds: Set<String> = []
+    private var statusBarFlashReset: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusBar()
@@ -60,15 +61,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = statusItem.button else { return }
 
-        button.image = NSImage(
-            systemSymbolName: "globe.asia.australia.fill",
-            accessibilityDescription: "DynamicMainland"
-        )
-        button.image?.size = NSSize(width: 16, height: 16)
+        button.image = Self.statusBarImage(Self.statusBarSymbol)
         button.imagePosition = .imageLeading
         button.action = #selector(statusBarClicked(_:))
         button.target = self
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+    }
+
+    private static let statusBarSymbol = "globe.asia.australia.fill"
+
+    private static func statusBarImage(_ symbolName: String) -> NSImage? {
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "DynamicMainland")
+        image?.size = NSSize(width: 16, height: 16)
+        return image
     }
 
     @objc private func statusBarClicked(_ sender: NSStatusBarButton) {
@@ -94,11 +99,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func installHooksAction() {
         viewModel.installHooks()
         guard let feedback = viewModel.installFeedback else { return }
+        guard feedback.error != nil else {
+            flashStatusBarCheckmark()
+            return
+        }
 
-        // 面板可能隐藏或不在安装页，用弹窗确保菜单触发的安装结果可见；关闭后把焦点还给原先的前台 App
+        // 面板可能隐藏或不在安装页，失败时用弹窗确保菜单触发的安装结果可见；关闭后把焦点还给原先的前台 App
         let previousApp = NSWorkspace.shared.frontmostApplication
         let alert = NSAlert()
-        alert.alertStyle = feedback.error == nil ? .informational : .warning
+        alert.alertStyle = .warning
         alert.messageText = feedback.message
         // 面板在 .statusBar 层级会盖住弹窗，弹窗期间临时降到弹窗之下
         let panelLevel = panel.level
@@ -107,6 +116,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
         panel.level = panelLevel
         previousApp?.activate()
+    }
+
+    /// 安装成功的轻量确认：菜单栏图标短暂变成绿色对勾，不弹窗、不抢焦点
+    private func flashStatusBarCheckmark() {
+        guard let button = statusItem.button else { return }
+        statusBarFlashReset?.cancel()
+        button.image = Self.statusBarImage("checkmark.circle.fill")
+        button.contentTintColor = .systemGreen
+        let reset = DispatchWorkItem {
+            button.image = Self.statusBarImage(Self.statusBarSymbol)
+            button.contentTintColor = nil
+        }
+        statusBarFlashReset = reset
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: reset)
     }
 
     @objc private func quitApp() {
