@@ -4,8 +4,8 @@ import SwiftUI
 /// 刘海区域的浮动面板 — 深色圆角，非激活式
 final class NotchPanel: NSPanel {
     private static let panelWidth: CGFloat = 380
-    /// 最小高度：够放 header + 空状态 + footer
-    private static let minHeight: CGFloat = 300
+    /// 最小高度：略低于最少内容（header + 单个会话行 + footer ≈ 126pt），只兜底异常的小上报值
+    private static let minHeight: CGFloat = 120
     /// 最大高度上限（还会受所在屏幕可用高度限制）
     private static let maxHeightCap: CGFloat = 640
     /// 面板顶边与刘海 / 菜单栏的间距
